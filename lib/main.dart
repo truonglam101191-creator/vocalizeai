@@ -9,6 +9,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(const VocalizeAIApp());
@@ -513,6 +514,23 @@ class _SttTabState extends State<SttTab>
                           style: GoogleFonts.inter(
                               fontWeight: FontWeight.w600,
                               color: Colors.white)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded,
+                            color: Color(0xFF06B6D4), size: 20),
+                        tooltip: 'Copy subtitles',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: _outputText));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Subtitles copied to clipboard!',
+                                  style: GoogleFonts.inter()),
+                              backgroundColor: const Color(0xFF10B981),
+                              duration: const Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -546,8 +564,8 @@ class _TranslateTabState extends State<TranslateTab>
   bool get wantKeepAlive => true;
 
   final _inputCtrl = TextEditingController();
-  final _tokenCtrl = TextEditingController();
-  final _modelCtrl = TextEditingController(text: 'gpt-3.5-turbo');
+  String _fromLang = 'en';
+  String _toLang = 'vi';
   bool _isProcessing = false;
   String _translatedText = "";
 
@@ -566,10 +584,10 @@ class _TranslateTabState extends State<TranslateTab>
       final req = http.MultipartRequest(
           'POST', Uri.parse('http://127.0.0.1:5000/translate'));
       req.fields['text'] = _inputCtrl.text;
-      req.fields['token'] = _tokenCtrl.text;
-      req.fields['model'] = _modelCtrl.text;
+      req.fields['from_lang'] = _fromLang;
+      req.fields['to_lang'] = _toLang;
 
-      final res = await req.send();
+      final res = await req.send().timeout(const Duration(minutes: 5));
       final body = await res.stream.bytesToString();
       if (res.statusCode == 200) {
         final json = jsonDecode(body);
@@ -595,19 +613,66 @@ class _TranslateTabState extends State<TranslateTab>
           Row(
             children: [
               Expanded(
-                child: _StyledTextField(
-                  controller: _tokenCtrl,
-                  label: 'OpenAI Token',
-                  icon: Icons.vpn_key_rounded,
-                  obscureText: true,
+                child: _GlassCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _fromLang,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF1E1E2C),
+                      style:
+                          GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'en', child: Text('English (EN)')),
+                        DropdownMenuItem(
+                            value: 'vi', child: Text('Vietnamese (VI)')),
+                        DropdownMenuItem(
+                            value: 'fr', child: Text('French (FR)')),
+                        DropdownMenuItem(
+                            value: 'es', child: Text('Spanish (ES)')),
+                        DropdownMenuItem(
+                            value: 'zh', child: Text('Chinese (ZH)')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) setState(() => _fromLang = val);
+                      },
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 16),
+              const Icon(Icons.arrow_forward_rounded, color: Colors.white54),
+              const SizedBox(width: 16),
               Expanded(
-                child: _StyledTextField(
-                  controller: _modelCtrl,
-                  label: 'Model (e.g. gpt-4)',
-                  icon: Icons.memory_rounded,
+                child: _GlassCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _toLang,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF1E1E2C),
+                      style:
+                          GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'en', child: Text('English (EN)')),
+                        DropdownMenuItem(
+                            value: 'vi', child: Text('Vietnamese (VI)')),
+                        DropdownMenuItem(
+                            value: 'fr', child: Text('French (FR)')),
+                        DropdownMenuItem(
+                            value: 'es', child: Text('Spanish (ES)')),
+                        DropdownMenuItem(
+                            value: 'zh', child: Text('Chinese (ZH)')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) setState(() => _toLang = val);
+                      },
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -657,6 +722,24 @@ class _TranslateTabState extends State<TranslateTab>
                           style: GoogleFonts.inter(
                               fontWeight: FontWeight.w600,
                               color: Colors.white)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded,
+                            color: Color(0xFF06B6D4), size: 20),
+                        tooltip: 'Copy translation',
+                        onPressed: () {
+                          Clipboard.setData(
+                              ClipboardData(text: _translatedText));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Translation copied to clipboard!',
+                                  style: GoogleFonts.inter()),
+                              backgroundColor: const Color(0xFF10B981),
+                              duration: const Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -785,16 +868,55 @@ class _TtsTabState extends State<TtsTab>
         children: [
           _GlassCard(
             padding: const EdgeInsets.all(4),
-            child: TextField(
-              controller: _textCtrl,
-              maxLines: 6,
-              style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
-              decoration: const InputDecoration(
-                hintText: 'Paste translated SRT or plain text here...',
-                hintStyle: TextStyle(color: Colors.white30),
-                contentPadding: EdgeInsets.all(20),
-                border: InputBorder.none,
-              ),
+            child: Stack(
+              children: [
+                TextField(
+                  controller: _textCtrl,
+                  maxLines: 6,
+                  style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                  decoration: const InputDecoration(
+                    hintText: 'Paste translated SRT or plain text here...',
+                    hintStyle: TextStyle(color: Colors.white30),
+                    contentPadding: EdgeInsets.only(
+                        left: 20, right: 48, top: 20, bottom: 20),
+                    border: InputBorder.none,
+                  ),
+                ),
+                Positioned(
+                  right: 4,
+                  top: 4,
+                  child: IconButton(
+                    icon: const Icon(Icons.copy_rounded,
+                        color: Color(0xFF06B6D4), size: 20),
+                    tooltip: 'Copy content',
+                    onPressed: () {
+                      if (_textCtrl.text.isNotEmpty) {
+                        Clipboard.setData(ClipboardData(text: _textCtrl.text));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Copied to clipboard!',
+                                style: GoogleFonts.inter()),
+                            backgroundColor: const Color(0xFF10B981),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+                Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: IconButton(
+                    icon: const Icon(Icons.clear_all_rounded,
+                        color: Colors.white30, size: 20),
+                    tooltip: 'Clear content',
+                    onPressed: () {
+                      setState(() => _textCtrl.clear());
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),

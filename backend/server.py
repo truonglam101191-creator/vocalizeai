@@ -309,18 +309,47 @@ def write_srt(segments, path: Path) -> str:
 
 def parse_srt(srt_content: str):
     """Parse SRT → list of (start_sec, end_sec, text)"""
-    pattern = re.compile(
-        r"(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n([\s\S]*?)(?=\n\n|\Z)",
-        re.MULTILINE,
-    )
+    import re
     entries = []
-    for m in pattern.finditer(srt_content):
-        start = srt_time_to_seconds(m.group(2))
-        end = srt_time_to_seconds(m.group(3))
-        text = m.group(4).strip().replace("\n", " ")
+    lines = [line.strip() for line in srt_content.strip().replace('\r\n', '\n').split('\n')]
+    
+    current_start = None
+    current_end = None
+    current_text = []
+    
+    for line in lines:
+        match = re.match(r"(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})", line)
+        if match:
+            if current_text and current_text[-1].isdigit():
+                current_text.pop()
+                
+            if current_start is not None:
+                text = " ".join(current_text).strip()
+                if text:
+                    entries.append((current_start, current_end, text))
+            
+            current_start = srt_time_to_seconds(match.group(1))
+            current_end = srt_time_to_seconds(match.group(2))
+            current_text = []
+        elif line:
+            # Ignore the very first index before any timestamp
+            if current_start is None and line.isdigit():
+                continue
+            current_text.append(line)
+            
+    if current_start is not None:
+        text = " ".join(current_text).strip()
         if text:
-            entries.append((start, end, text))
+            entries.append((current_start, current_end, text))
+            
     return entries
+
+def format_srt_time(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int(round((seconds - int(seconds)) * 1000))
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 # ────────────────────────────────────────────────────────────
@@ -389,22 +418,57 @@ def step_tts(srt_content: str, output_dir: Path, tts_voice: str = None) -> list:
             clip_path = output_dir / f"clip_{i:04d}_{j:02d}.wav"
             log.info("   TTS [%d/%d] %.1fs→%.1fs: %s", i + 1, len(entries), start, end, chunk[:60])
             try:
+                # Remove digits before TTS to prevent Piper from crashing, 
+                # especially for languages like Vietnamese that lack digit support.
+                import re
+                safe_chunk = re.sub(r'\d+', '', chunk).strip()
+                if not safe_chunk:
+                    continue
+                    
                 # Piper synthesizes directly to a wav file
                 with wave.open(str(clip_path), "wb") as wav_file:
-                    tts.synthesize(chunk, wav_file)
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(tts.config.sample_rate)
+                    tts.synthesize(safe_chunk, wav_file)
 
                 # Merge chunk clips if multiple
                 from pydub import AudioSegment
                 chunk_audio = AudioSegment.from_wav(str(clip_path))
+                
+                if len(chunk_audio) == 0:
+                    # Piper failed silently (likely Mac ARM64 onnx/phonemize mismatch).
+                    # Fallback to Apple's built-in robust offline TTS ('say').
+                    import subprocess
+                    aiff_path = str(clip_path).replace('.wav', '.aiff')
+                    txt_path = str(clip_path).replace('.wav', '.txt')
+                    
+                    # Apple 'say' supports digits natively, so we use the ORIGINAL 'chunk'
+                    # We write to a text file to prevent command line flag injection (e.g. text starting with '-')
+                    with open(txt_path, "w", encoding="utf-8") as f:
+                        f.write(chunk)
+                    
+                    # Try to use Vietnamese voice 'Linh' if available, else default
+                    try:
+                        subprocess.run(["say", "-v", "Linh", "-o", aiff_path, "-f", txt_path], check=True, stderr=subprocess.DEVNULL)
+                    except:
+                        subprocess.run(["say", "-o", aiff_path, "-f", txt_path], check=True)
+                        
+                    chunk_audio = AudioSegment.from_file(aiff_path, format="aiff")
+                    chunk_audio.export(str(clip_path), format="wav") # save over as wav for consistency
+                
+                log.info(f"   --> Chunk audio length: {len(chunk_audio)} ms")
                 combined_audio = chunk_audio if combined_audio is None else combined_audio + chunk_audio
 
             except Exception as e:
-                log.error("   ❌ TTS failed for chunk: %s | error: %s", chunk[:40], e)
-                continue
+                err_msg = str(e)
+                log.error("   ❌ TTS failed for chunk: %s | error: %s", chunk[:40], err_msg)
+                raise Exception(f"TTS failed: {err_msg}")
 
         if combined_audio is not None:
             merged_path = output_dir / f"clip_{i:04d}.wav"
             combined_audio.export(str(merged_path), format="wav")
+            log.info(f"✅ Entry {i} combined audio length: {len(combined_audio)} ms")
             clips.append((start, end, merged_path))
 
     log.info("✅ Generated %d audio clips", len(clips))
@@ -614,44 +678,96 @@ async def run_stt(file: UploadFile = File(...)):
 @app.post("/translate")
 async def run_translate(
     text: str = Form(...),
-    token: str = Form(""),
-    model: str = Form("gpt-3.5-turbo"),
-    base_url: str = Form("https://api.openai.com/v1")
+    from_lang: str = Form("en"),
+    to_lang: str = Form("vi")
 ):
-    """Translate text using user-provided OpenAI compatible token and model."""
-    if not token.strip():
-        # Fallback dummy translation
-        return {"translated_text": f"[Needs Token] {text}"}
+    """Translate text using 100% offline argostranslate."""
+    if not text.strip() or from_lang == to_lang:
+        return {"translated_text": text}
         
-    import urllib.request
-    import json
-    
-    req_data = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "You are a highly accurate translation assistant. Translate the user's text into their requested language (or if not specified, default to English/Vietnamese appropriately). Keep the formatting intact."},
-            {"role": "user", "content": f"Please translate this text:\n\n{text}"}
-        ],
-        "temperature": 0.3
-    }
-    
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(req_data).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token.strip()}"
-        }
-    )
-    
     try:
-        with urllib.request.urlopen(req) as response:
-            res_data = json.loads(response.read().decode("utf-8"))
-            translated = res_data["choices"][0]["message"]["content"]
-            return {"translated_text": translated}
+        import argostranslate.package
+        import argostranslate.translate
+    except ImportError:
+        raise HTTPException(500, "argostranslate is not installed. Please run: pip install argostranslate")
+
+    def ensure_model(fc, tc):
+        installed = argostranslate.translate.get_installed_languages()
+        if next((l for l in installed if l.code == fc), None) and \
+           next((l for l in installed if l.code == tc), None) and \
+           next((l for l in installed if l.code == fc)).get_translation(next((l for l in installed if l.code == tc))):
+            return True
+            
+        argostranslate.package.update_package_index()
+        available = argostranslate.package.get_available_packages()
+        pkg = next((p for p in available if p.from_code == fc and p.to_code == tc), None)
+        if pkg:
+            argostranslate.package.install_from_path(pkg.download())
+            return True
+        return False
+
+    def do_translate(t, f_lang, t_lang):
+        import argostranslate.translate
+        
+        # 1. Try direct translation
+        direct = argostranslate.translate.get_translation_from_codes(f_lang, t_lang)
+        if direct:
+            return direct.translate(t)
+            
+        # 2. Try manual pivot through English
+        if f_lang != "en" and t_lang != "en":
+            t1 = argostranslate.translate.get_translation_from_codes(f_lang, "en")
+            t2 = argostranslate.translate.get_translation_from_codes("en", t_lang)
+            if t1 and t2:
+                intermediate = t1.translate(t)
+                return t2.translate(intermediate)
+                
+        raise ValueError(f"No translation path found from {f_lang} to {t_lang}")
+
+    try:
+        if not ensure_model(from_lang, to_lang):
+            # Try pivot translation through English
+            if from_lang != "en" and to_lang != "en":
+                log.info(f"Direct {from_lang}->{to_lang} not found. Attempting pivot via English...")
+                success1 = ensure_model(from_lang, "en")
+                success2 = ensure_model("en", to_lang)
+                if not (success1 and success2):
+                    raise ValueError(f"Pivot models ({from_lang}->en and en->{to_lang}) unavailable.")
+            else:
+                raise ValueError(f"Direct model {from_lang}->{to_lang} unavailable.")
+                
+        # Force reload installed languages list just in case new models were downloaded
+        import argostranslate.translate
+        if hasattr(argostranslate.translate, 'clear_cache'):
+            argostranslate.translate.clear_cache()
+            
     except Exception as e:
-        raise HTTPException(500, f"Translation API Error: {str(e)}")
+        raise HTTPException(500, f"Error ensuring translation model: {e}")
+
+    # Check if input is SRT
+    if "-->" in text:
+        entries = parse_srt(text)
+        if not entries:
+            raise HTTPException(400, "Invalid SRT format")
+            
+        translated_entries = []
+        for idx, (start, end, sub_text) in enumerate(entries, 1):
+            try:
+                translated_sub = do_translate(sub_text, from_lang, to_lang)
+                start_str = format_srt_time(start)
+                end_str = format_srt_time(end)
+                translated_entries.append(f"{idx}\n{start_str} --> {end_str}\n{translated_sub}\n")
+            except Exception as e:
+                log.error(f"Translation failed for segment {idx}: {e}")
+                start_str = format_srt_time(start)
+                end_str = format_srt_time(end)
+                translated_entries.append(f"{idx}\n{start_str} --> {end_str}\n{sub_text}\n")
+            
+        final_text = "\n".join(translated_entries)
+    else:
+        final_text = do_translate(text, from_lang, to_lang)
+
+    return {"translated_text": final_text}
 
 
 @app.post("/tts")
@@ -684,7 +800,33 @@ async def run_tts(
         tts = get_tts_model(tts_voice)
         import wave
         with wave.open(str(out_wav), "wb") as wav_file:
-            tts.synthesize(text, wav_file)
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(tts.config.sample_rate)
+            import re
+            safe_text = re.sub(r'\d+', '', text).strip()
+            if safe_text:
+                tts.synthesize(safe_text, wav_file)
+                
+        # Check if silent
+        from pydub import AudioSegment
+        import os
+        if not out_wav.exists() or os.path.getsize(out_wav) <= 44: # 44 bytes is empty WAV header
+            log.info("Piper failed silently for plain text. Falling back to Apple 'say'")
+            import subprocess
+            aiff_path = str(out_wav).replace('.wav', '.aiff')
+            txt_path = str(out_wav).replace('.wav', '.txt')
+            
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(text)
+                
+            try:
+                subprocess.run(["say", "-v", "Linh", "-o", aiff_path, "-f", txt_path], check=True, stderr=subprocess.DEVNULL)
+            except:
+                subprocess.run(["say", "-o", aiff_path, "-f", txt_path], check=True)
+                
+            chunk_audio = AudioSegment.from_file(aiff_path, format="aiff")
+            chunk_audio.export(str(out_wav), format="wav")
         
     return FileResponse(out_wav, media_type="audio/wav", filename="tts_output.wav")
 
