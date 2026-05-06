@@ -1,7 +1,7 @@
 # VocalizeAI Backend Dependencies
 # Install with: pip install -r requirements.txt
-# ⚠️  Requires Python 3.11 (Coqui TTS không hỗ trợ 3.12+)
-#     Nếu chỉ có Python 3.12+, dùng: pip install -r requirements-lite.txt
+# ⚠️  Piper TTS uses CLI binary (not Python package)
+#     Binary is auto-downloaded on first run
 
 # ── Web Framework ──
 fastapi>=0.100.0
@@ -11,8 +11,8 @@ python-multipart>=0.0.6
 # ── Speech-to-Text ──
 faster-whisper>=1.0.0
 
-# ── Text-to-Speech (Tiếng Việt) ──
-piper-tts>=1.2.0
+# ── Text-to-Speech ──
+# Piper TTS CLI binary — auto-downloaded, no pip package needed
 
 # ── Audio Processing ──
 pydub>=0.25.1
@@ -20,4 +20,5 @@ pydub>=0.25.1
 
 # ── Utilities ──
 numpy<2.0
-argostranslate
+spacy<3.8.0
+argostranslate==1.9.1

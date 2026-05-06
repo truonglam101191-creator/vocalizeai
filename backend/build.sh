@@ -29,12 +29,10 @@ pip install --upgrade pip -q
 pip install -r requirements.txt -q
 pip install pyinstaller -q
 
-# ── 3. Collect TTS model paths (needed for PyInstaller data) ──
-echo "→ Locating TTS package data..."
-TTS_PKG=$(python3 -c "import TTS; import os; print(os.path.dirname(TTS.__file__))")
+# ── 3. Collect package paths (needed for PyInstaller data) ──
+echo "→ Locating package data..."
 FASTER_WHISPER_PKG=$(python3 -c "import faster_whisper; import os; print(os.path.dirname(faster_whisper.__file__))")
 
-echo "   TTS: $TTS_PKG"
 echo "   faster-whisper: $FASTER_WHISPER_PKG"
 
 # ── 4. PyInstaller spec ──
@@ -50,7 +48,6 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
-        ('$TTS_PKG', 'TTS'),
         ('$FASTER_WHISPER_PKG', 'faster_whisper'),
     ],
     hiddenimports=[
@@ -58,11 +55,6 @@ a = Analysis(
         'ctranslate2',
         'tokenizers',
         'huggingface_hub',
-        'TTS',
-        'TTS.api',
-        'TTS.tts.configs',
-        'TTS.tts.models.xtts',
-        'TTS.utils',
         'uvicorn',
         'uvicorn.logging',
         'uvicorn.loops',
@@ -73,14 +65,11 @@ a = Analysis(
         'fastapi',
         'pydub',
         'numpy',
-        'torch',
-        'torchaudio',
-        'soundfile',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['matplotlib', 'tkinter', 'PyQt5', 'wx'],
+    excludes=['matplotlib', 'tkinter', 'PyQt5', 'wx', 'torch', 'torchaudio'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

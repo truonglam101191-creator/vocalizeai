@@ -56,11 +56,22 @@ class BackendManager {
     } catch (_) {}
 
     final execDir = File(Platform.resolvedExecutable).parent.path;
-    final exeCandidates = [
-      p.join(execDir, '..', 'Resources', 'backend', 'vocalizeai_backend'),
-      p.join(execDir, 'backend', 'vocalizeai_backend'),
-      p.join(Directory.current.path, 'backend', 'vocalizeai_backend'),
-    ];
+
+    // ── Platform-specific binary candidates ──
+    final List<String> exeCandidates;
+    if (Platform.isWindows) {
+      exeCandidates = [
+        p.join(execDir, 'backend', 'vocalizeai_backend.exe'),
+        p.join(execDir, 'data', 'backend', 'vocalizeai_backend.exe'),
+        p.join(Directory.current.path, 'backend', 'vocalizeai_backend.exe'),
+      ];
+    } else {
+      exeCandidates = [
+        p.join(execDir, '..', 'Resources', 'backend', 'vocalizeai_backend'),
+        p.join(execDir, 'backend', 'vocalizeai_backend'),
+        p.join(Directory.current.path, 'backend', 'vocalizeai_backend'),
+      ];
+    }
 
     for (final c in exeCandidates) {
       final f = File(c);
@@ -71,6 +82,7 @@ class BackendManager {
       }
     }
 
+    // ── Fallback: run server.py directly ──
     final projectCandidates = <String>[];
     var dir = Directory(execDir);
     for (var i = 0; i < 12; i++) {
@@ -80,18 +92,28 @@ class BackendManager {
       }
       dir = dir.parent;
     }
-    projectCandidates.addAll([
-      Directory.current.path,
-      '/Users/macbook/Desktop/project/AI/vocalizeai'
-    ]);
+    projectCandidates.add(Directory.current.path);
+    if (Platform.isMacOS) {
+      projectCandidates.add('/Users/macbook/Desktop/project/AI/vocalizeai');
+    }
 
     for (final projectRoot in projectCandidates) {
       final scriptPath = p.join(projectRoot, 'backend', 'server.py');
       final f = File(scriptPath);
       if (await f.exists()) {
         final backendDir = f.parent.path;
-        final venvPython = p.join(backendDir, 'venv', 'bin', 'python');
-        final python = await File(venvPython).exists() ? venvPython : 'python3';
+
+        // Detect Python in venv (platform-aware)
+        String python;
+        if (Platform.isWindows) {
+          final venvPython =
+              p.join(backendDir, 'venv', 'Scripts', 'python.exe');
+          python = await File(venvPython).exists() ? venvPython : 'python';
+        } else {
+          final venvPython = p.join(backendDir, 'venv', 'bin', 'python');
+          python = await File(venvPython).exists() ? venvPython : 'python3';
+        }
+
         try {
           _process = await Process.start(python, [scriptPath],
               workingDirectory: backendDir, mode: ProcessStartMode.normal);
@@ -568,6 +590,40 @@ class _TranslateTabState extends State<TranslateTab>
   String _toLang = 'vi';
   bool _isProcessing = false;
   String _translatedText = "";
+  List<String> _outputFiles = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFiles();
+  }
+
+  Future<void> _loadFiles() async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final targetDir = Directory('${docDir.path}/VocalizeAI/Translations');
+      if (await targetDir.exists()) {
+        final files = targetDir.listSync().whereType<File>().toList();
+        files.sort(
+            (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+        if (mounted) {
+          setState(() {
+            _outputFiles = files.map((f) => f.path).toList();
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _openFolder(String filePath) {
+    if (Platform.isWindows) {
+      Process.run('explorer.exe', ['/select,', filePath]);
+    } else if (Platform.isMacOS) {
+      Process.run('open', ['-R', filePath]);
+    } else if (Platform.isLinux) {
+      Process.run('xdg-open', [File(filePath).parent.path]);
+    }
+  }
 
   Future<void> _pickTextFile() async {
     final res = await FilePicker.platform.pickFiles(type: FileType.any);
@@ -591,7 +647,25 @@ class _TranslateTabState extends State<TranslateTab>
       final body = await res.stream.bytesToString();
       if (res.statusCode == 200) {
         final json = jsonDecode(body);
-        setState(() => _translatedText = json['translated_text'] ?? '');
+        final text = json['translated_text'] ?? '';
+
+        final docDir = await getApplicationDocumentsDirectory();
+        final targetDir = Directory('${docDir.path}/VocalizeAI/Translations');
+        if (!await targetDir.exists()) {
+          await targetDir.create(recursive: true);
+        }
+        final isSrt = _inputCtrl.text.contains('-->');
+        final ext = isSrt ? 'srt' : 'txt';
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final file = File('${targetDir.path}/translation_$timestamp.$ext');
+        await file.writeAsString(text);
+
+        setState(() {
+          _translatedText = text;
+          if (!_outputFiles.contains(file.path)) {
+            _outputFiles.insert(0, file.path);
+          }
+        });
       } else {
         setState(() => _translatedText = "Error: $body");
       }
@@ -751,6 +825,83 @@ class _TranslateTabState extends State<TranslateTab>
                 ],
               ),
             ),
+          ],
+          if (_outputFiles.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                const Icon(Icons.folder_copy_rounded,
+                    color: Colors.white70, size: 20),
+                const SizedBox(width: 8),
+                Text('Saved Translations',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600, color: Colors.white)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _outputFiles.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final path = _outputFiles[index];
+                return _GlassCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.description_rounded,
+                          color: Color(0xFF06B6D4), size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              p.basename(path),
+                              style: GoogleFonts.inter(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 14),
+                            ),
+                            Text(
+                              path,
+                              style: GoogleFonts.inter(
+                                  color: Colors.white30, fontSize: 11),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.folder_open_rounded,
+                            color: Colors.white70, size: 20),
+                        tooltip: 'Open folder',
+                        onPressed: () => _openFolder(path),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded,
+                            color: Colors.white70, size: 20),
+                        tooltip: 'Copy file path',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: path));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Path copied!',
+                                  style: GoogleFonts.inter()),
+                              backgroundColor: const Color(0xFF10B981),
+                              duration: const Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ]
         ],
       ),
@@ -779,16 +930,94 @@ class _TtsTabState extends State<TtsTab>
   String? _outputWavPath;
   final AudioPlayer _player = AudioPlayer();
   bool _isPlaying = false;
+  List<String> _outputFiles = [];
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  double _playbackRate = 1.0;
 
   @override
   void initState() {
     super.initState();
+    _loadFiles();
     _fetchVoices();
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) {
         setState(() => _isPlaying = state == PlayerState.playing);
       }
     });
+    _player.onPositionChanged.listen((pos) {
+      if (mounted) setState(() => _position = pos);
+    });
+    _player.onDurationChanged.listen((dur) {
+      if (mounted) setState(() => _duration = dur);
+    });
+    _player.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _position = Duration.zero;
+          _isPlaying = false;
+        });
+      }
+    });
+  }
+
+  void _seekBackward() {
+    final newPos = _position - const Duration(seconds: 10);
+    _player.seek(newPos < Duration.zero ? Duration.zero : newPos);
+  }
+
+  void _seekForward() {
+    final newPos = _position + const Duration(seconds: 10);
+    _player.seek(newPos > _duration ? _duration : newPos);
+  }
+
+  void _changeSpeed() {
+    setState(() {
+      if (_playbackRate == 1.0) {
+        _playbackRate = 1.25;
+      } else if (_playbackRate == 1.25) {
+        _playbackRate = 1.5;
+      } else if (_playbackRate == 1.5) {
+        _playbackRate = 2.0;
+      } else {
+        _playbackRate = 1.0;
+      }
+    });
+    _player.setPlaybackRate(_playbackRate);
+  }
+
+  String _formatDuration(Duration d) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String minutes = twoDigits(d.inMinutes.remainder(60));
+    String seconds = twoDigits(d.inSeconds.remainder(60));
+    return "$minutes:$seconds";
+  }
+
+  Future<void> _loadFiles() async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final targetDir = Directory('${docDir.path}/VocalizeAI/TTS');
+      if (await targetDir.exists()) {
+        final files = targetDir.listSync().whereType<File>().toList();
+        files.sort(
+            (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+        if (mounted) {
+          setState(() {
+            _outputFiles = files.map((f) => f.path).toList();
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _openFolder(String filePath) {
+    if (Platform.isWindows) {
+      Process.run('explorer.exe', ['/select,', filePath]);
+    } else if (Platform.isMacOS) {
+      Process.run('open', ['-R', filePath]);
+    } else if (Platform.isLinux) {
+      Process.run('xdg-open', [File(filePath).parent.path]);
+    }
   }
 
   @override
@@ -834,7 +1063,10 @@ class _TtsTabState extends State<TtsTab>
     setState(() {
       _isProcessing = true;
       _outputWavPath = null;
+      _position = Duration.zero;
+      _duration = Duration.zero;
     });
+    _player.stop();
     try {
       final req =
           http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5000/tts'));
@@ -845,11 +1077,20 @@ class _TtsTabState extends State<TtsTab>
       final res = await req.send().timeout(const Duration(minutes: 10));
       if (res.statusCode == 200) {
         final bytes = await res.stream.toBytes();
-        final dir = await getApplicationDocumentsDirectory();
+        final docDir = await getApplicationDocumentsDirectory();
+        final targetDir = Directory('${docDir.path}/VocalizeAI/TTS');
+        if (!await targetDir.exists()) {
+          await targetDir.create(recursive: true);
+        }
         final outPath = p.join(
-            dir.path, 'tts_${DateTime.now().millisecondsSinceEpoch}.wav');
+            targetDir.path, 'tts_${DateTime.now().millisecondsSinceEpoch}.wav');
         await File(outPath).writeAsBytes(bytes);
-        setState(() => _outputWavPath = outPath);
+        setState(() {
+          _outputWavPath = outPath;
+          if (!_outputFiles.contains(outPath)) {
+            _outputFiles.insert(0, outPath);
+          }
+        });
       }
     } catch (e) {
       debugPrint("TTS Error: $e");
@@ -979,22 +1220,95 @@ class _TtsTabState extends State<TtsTab>
                     style:
                         GoogleFonts.inter(color: Colors.white54, fontSize: 12),
                   ),
+                  const SizedBox(height: 16),
+                  SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 4,
+                      thumbShape:
+                          const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      overlayShape:
+                          const RoundSliderOverlayShape(overlayRadius: 14),
+                    ),
+                    child: Slider(
+                      value: _position.inSeconds.toDouble().clamp(
+                          0.0,
+                          _duration.inSeconds.toDouble() > 0
+                              ? _duration.inSeconds.toDouble()
+                              : 1.0),
+                      max: _duration.inSeconds.toDouble() > 0
+                          ? _duration.inSeconds.toDouble()
+                          : 1.0,
+                      onChanged: (val) =>
+                          _player.seek(Duration(seconds: val.toInt())),
+                      activeColor: const Color(0xFF10B981),
+                      inactiveColor: Colors.white24,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(_formatDuration(_position),
+                            style: GoogleFonts.jetBrainsMono(
+                                color: Colors.white54, fontSize: 12)),
+                        Text(_formatDuration(_duration),
+                            style: GoogleFonts.jetBrainsMono(
+                                color: Colors.white54, fontSize: 12)),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      // Speed Control
+                      InkWell(
+                        onTap: _changeSpeed,
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withOpacity(0.05),
+                          ),
+                          child: Text('${_playbackRate}x',
+                              style: GoogleFonts.inter(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13)),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Prev 10s
+                      IconButton(
+                        icon: const Icon(Icons.replay_10_rounded,
+                            color: Colors.white70, size: 32),
+                        onPressed: _seekBackward,
+                      ),
+                      const SizedBox(width: 16),
+                      // Play/Pause
                       InkWell(
                         onTap: () {
                           if (_isPlaying) {
                             _player.pause();
                           } else {
-                            _player.play(DeviceFileSource(_outputWavPath!));
+                            if (_position > Duration.zero &&
+                                _position < _duration) {
+                              _player.resume();
+                              _player.setPlaybackRate(_playbackRate);
+                            } else {
+                              _player.play(DeviceFileSource(_outputWavPath!));
+                              _player.setPlaybackRate(_playbackRate);
+                            }
                           }
                         },
                         borderRadius: BorderRadius.circular(30),
                         child: Container(
-                          width: 60,
-                          height: 60,
+                          width: 64,
+                          height: 64,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: const LinearGradient(
@@ -1013,15 +1327,102 @@ class _TtsTabState extends State<TtsTab>
                                 ? Icons.pause_rounded
                                 : Icons.play_arrow_rounded,
                             color: Colors.white,
-                            size: 32,
+                            size: 36,
                           ),
                         ),
                       ),
+                      const SizedBox(width: 16),
+                      // Next 10s
+                      IconButton(
+                        icon: const Icon(Icons.forward_10_rounded,
+                            color: Colors.white70, size: 32),
+                        onPressed: _seekForward,
+                      ),
+                      const SizedBox(width: 16),
+                      // Empty placeholder to balance layout
+                      const SizedBox(width: 48),
                     ],
                   )
                 ],
               ),
             )
+          ],
+          if (_outputFiles.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                const Icon(Icons.folder_copy_rounded,
+                    color: Colors.white70, size: 20),
+                const SizedBox(width: 8),
+                Text('Generated Audios',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600, color: Colors.white)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _outputFiles.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final path = _outputFiles[index];
+                return _GlassCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.audiotrack_rounded,
+                          color: Color(0xFFF59E0B), size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              p.basename(path),
+                              style: GoogleFonts.inter(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 14),
+                            ),
+                            Text(
+                              path,
+                              style: GoogleFonts.inter(
+                                  color: Colors.white30, fontSize: 11),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.folder_open_rounded,
+                            color: Colors.white70, size: 20),
+                        tooltip: 'Open folder',
+                        onPressed: () => _openFolder(path),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded,
+                            color: Colors.white70, size: 20),
+                        tooltip: 'Copy file path',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: path));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Path copied!',
+                                  style: GoogleFonts.inter()),
+                              backgroundColor: const Color(0xFF10B981),
+                              duration: const Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ]
         ],
       ),

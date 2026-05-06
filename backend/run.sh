@@ -43,7 +43,8 @@ MARKER="venv/.deps_installed"
 if [ ! -f "$MARKER" ]; then
   echo ""
   echo "📦 Cài đặt Python packages (lần đầu ~5-10 phút)..."
-  echo "   Bao gồm: FastAPI, faster-whisper, Coqui TTS, pydub"
+  echo "   Bao gồm: FastAPI, faster-whisper, pydub"
+  echo "   Piper TTS sử dụng CLI binary (auto-download)"
   echo ""
   pip install --upgrade pip -q
   pip install -r requirements.txt

@@ -1,5 +1,5 @@
 name: vocalizeai
-description: "MP3 → SRT → WAV offline pipeline powered by Whisper + Coqui TTS"
+description: "MP3 → SRT → WAV offline pipeline powered by Whisper + Piper TTS"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -24,7 +24,7 @@ dependencies:
 
   # Audio playback
   audioplayers: ^6.1.0
-  argos_translator_offline: ^0.1.1
+  argos_translator_offline: ^1.2.0
 
 dev_dependencies:
   flutter_test:

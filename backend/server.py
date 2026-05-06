@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 VocalizeAI Backend - MP3 → Speech-to-Text → SRT → Text-to-Speech → WAV
-Full offline pipeline using faster-whisper + Coqui TTS + pydub
+Full offline pipeline using faster-whisper + Piper TTS CLI + pydub
+Cross-platform: macOS + Windows
 """
 
 import os
@@ -11,6 +12,9 @@ import logging
 import tempfile
 import re
 import gc
+import platform
+import subprocess
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -36,20 +40,24 @@ log = logging.getLogger("vocalizeai")
 # Dễ dọn dẹp: chỉ cần xóa thư mục này là giải phóng toàn bộ (~4GB)
 # Có thể override bằng env var VOCALIZEAI_CACHE_DIR
 BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-CACHE_DIR = Path(
-    os.environ.get("VOCALIZEAI_CACHE_DIR", os.path.expanduser("~/.cache/vocalizeai"))
-)
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
+
+if IS_WINDOWS:
+    _default_cache = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "vocalizeai")
+else:
+    _default_cache = os.path.expanduser("~/.cache/vocalizeai")
+
+CACHE_DIR = Path(os.environ.get("VOCALIZEAI_CACHE_DIR", _default_cache))
 MODELS_DIR = CACHE_DIR / "models"
 WHISPER_DIR = MODELS_DIR / "whisper"
 TTS_DIR = MODELS_DIR / "tts"
+PIPER_DIR = CACHE_DIR / "piper"  # Piper CLI binary location
 TEMP_DIR = CACHE_DIR / "temp"
 
-for d in [MODELS_DIR, WHISPER_DIR, TTS_DIR, TEMP_DIR]:
+for d in [MODELS_DIR, WHISPER_DIR, TTS_DIR, PIPER_DIR, TEMP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# Force Coqui TTS to use our managed cache dir (not ~/.local/share/tts/)
-os.environ["COQUI_TOS_AGREED"] = "1"
-os.environ["TTS_HOME"] = str(TTS_DIR)
 
 # ── HuggingFace Token (xác thực để tải model) ──
 HF_TOKEN = os.environ.get("HF_TOKEN", "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")
@@ -82,7 +90,7 @@ WHISPER_MODEL_PATH = os.environ.get("WHISPER_MODEL_PATH", None)
 # Global Model Cache + Status Tracking
 # ────────────────────────────────────────────────────────────
 _whisper_model = None
-_tts_model = None
+_piper_binary = None  # Path to piper CLI binary
 
 # Real-time status visible via /status endpoint
 _model_status = {
@@ -180,6 +188,12 @@ def get_whisper_model():
     if _whisper_model is None:
         from faster_whisper import WhisperModel
 
+        import multiprocessing
+        # Use up to 4 workers for parallel VAD segment transcription
+        cpu_count = multiprocessing.cpu_count()
+        workers = min(4, max(1, cpu_count // 2))
+        threads_per_worker = max(1, cpu_count // workers)
+
         existing = _find_existing_whisper_model(WHISPER_MODEL_NAME)
         if existing:
             _update_status("loading_whisper", 0.05, "Loading Whisper from local cache...")
@@ -187,6 +201,8 @@ def get_whisper_model():
                 existing,
                 device="cpu",
                 compute_type="int8",
+                num_workers=workers,
+                cpu_threads=threads_per_worker,
             )
         else:
             _update_status("downloading_whisper", 0.02, f"Downloading Whisper '{WHISPER_MODEL_NAME}' (~3GB from Systran/faster-whisper-large-v3)...")
@@ -195,13 +211,13 @@ def get_whisper_model():
                 device="cpu",
                 compute_type="int8",
                 download_root=str(WHISPER_DIR),
+                num_workers=workers,
+                cpu_threads=threads_per_worker,
             )
         _model_status["whisper_ready"] = True
         _update_status("loading_whisper", 0.45, "✅ Whisper model ready")
     return _whisper_model
 
-
-_tts_models = {}
 
 def get_piper_voices_data():
     """Fetch or load voices.json from rhasspy."""
@@ -215,52 +231,259 @@ def get_piper_voices_data():
         return json.load(f)
 
 
-def get_tts_model(voice_id: str = None):
-    """Load or return cached TTS model."""
-    global _tts_models
+def _find_piper_binary() -> Optional[str]:
+    """
+    Tìm Piper CLI binary theo thứ tự ưu tiên:
+    1. PIPER_PATH env var
+    2. PIPER_DIR (cache riêng của VocalizeAI)
+    3. Bundled trong thư mục backend/piper/
+    4. System PATH (đã cài global)
+    """
+    binary_name = "piper.exe" if IS_WINDOWS else "piper"
+
+    # 1. Env var override
+    env_path = os.environ.get("PIPER_PATH")
+    if env_path and os.path.isfile(env_path):
+        log.info("🔗 Piper binary from PIPER_PATH: %s", env_path)
+        return env_path
+
+    # 2. VocalizeAI cache dir
+    cached = PIPER_DIR / binary_name
+    if cached.is_file():
+        if not IS_WINDOWS:
+            os.chmod(str(cached), 0o755)
+        log.info("🔗 Piper binary from cache: %s", cached)
+        return str(cached)
+
+    # 3. Bundled with backend
+    bundled = BASE_DIR / "piper" / binary_name
+    if bundled.is_file():
+        if not IS_WINDOWS:
+            os.chmod(str(bundled), 0o755)
+        log.info("🔗 Piper binary bundled: %s", bundled)
+        return str(bundled)
+
+    # 4. System PATH
+    found = shutil.which(binary_name)
+    if found:
+        log.info("🔗 Piper binary from PATH: %s", found)
+        return found
+
+    return None
+
+
+def _download_piper_binary():
+    """
+    Tự động download Piper CLI binary cho platform hiện tại.
+    Hỗ trợ: macOS (arm64/x86_64), Windows (x86_64), Linux (x86_64/arm64)
+    """
+    import urllib.request
+    import tarfile
+    import zipfile
+
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    # Map architecture names
+    if machine in ("x86_64", "amd64"):
+        arch = "amd64"
+    elif machine in ("aarch64", "arm64"):
+        arch = "arm64"
+    else:
+        raise RuntimeError(f"Unsupported architecture: {machine}")
+
+    # Piper release URL patterns (GitHub releases)
+    base_url = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2"
+
+    if system == "darwin":
+        if arch == "arm64":
+            filename = "piper_macos_aarch64.tar.gz"
+        else:
+            filename = "piper_macos_x64.tar.gz"
+    elif system == "windows":
+        filename = "piper_windows_amd64.zip"
+    elif system == "linux":
+        if arch == "arm64":
+            filename = "piper_linux_aarch64.tar.gz"
+        else:
+            filename = "piper_linux_x86_64.tar.gz"
+    else:
+        raise RuntimeError(f"Unsupported platform: {system}")
+
+    url = f"{base_url}/{filename}"
+    download_path = PIPER_DIR / filename
+
+    log.info("⬇️  Downloading Piper CLI from %s ...", url)
+    _update_status("downloading_tts", 0.50, f"Downloading Piper CLI binary...")
+    urllib.request.urlretrieve(url, str(download_path))
+
+    # Extract
+    log.info("📦 Extracting Piper binary...")
+    if filename.endswith(".tar.gz"):
+        with tarfile.open(str(download_path), "r:gz") as tar:
+            tar.extractall(path=str(PIPER_DIR))
+    elif filename.endswith(".zip"):
+        with zipfile.ZipFile(str(download_path), "r") as zf:
+            zf.extractall(path=str(PIPER_DIR))
+
+    # After extraction, piper binary is inside PIPER_DIR/piper/
+    binary_name = "piper.exe" if IS_WINDOWS else "piper"
+    extracted_binary = PIPER_DIR / "piper" / binary_name
+
+    # Set executable permission on Unix
+    if not IS_WINDOWS and extracted_binary.is_file():
+        os.chmod(str(extracted_binary), 0o755)
+
+    if IS_MACOS:
+        # Download missing macOS dylibs from piper-phonemize
+        try:
+            log.info("⬇️  Downloading macOS dependencies...")
+            arch = "aarch64" if platform.machine() in ("aarch64", "arm64") else "x86_64"
+            phonemize_url = f"https://github.com/rhasspy/piper-phonemize/releases/download/2023.11.14-4/piper-phonemize_macos_{arch}.tar.gz"
+            phonemize_tar = PIPER_DIR / f"piper-phonemize_macos_{arch}.tar.gz"
+            import urllib.request
+            urllib.request.urlretrieve(phonemize_url, str(phonemize_tar))
+            with tarfile.open(str(phonemize_tar), "r:gz") as tar:
+                tar.extractall(path=str(PIPER_DIR / "piper"))
+            phonemize_tar.unlink(missing_ok=True)
+            
+            # Move dylibs out of piper-phonemize/lib folder
+            phonemize_lib = PIPER_DIR / "piper" / "piper-phonemize" / "lib"
+            if phonemize_lib.is_dir():
+                for item in phonemize_lib.iterdir():
+                    if item.is_file() and (item.name.endswith(".dylib") or ".dylib." in item.name):
+                        import shutil
+                        shutil.copy(str(item), str(PIPER_DIR / "piper" / item.name))
+                        
+            # Remove quarantine attribute to prevent Gatekeeper from blocking the binaries silently
+            import subprocess
+            subprocess.run(["xattr", "-rc", str(PIPER_DIR)], check=False)
+            
+        except Exception as e:
+            log.warning("⚠️ Failed to download macOS dependencies: %s", e)
+
+    # Cleanup downloaded archive
+    download_path.unlink(missing_ok=True)
+
+    found = _find_piper_binary()
+    if found:
+        log.info("✅ Piper binary installed at: %s", found)
+        return found
+        
+    return str(extracted_binary)
+
+
+def get_piper_binary() -> str:
+    """Get path to Piper CLI binary, download if needed."""
+    global _piper_binary
+    if _piper_binary and os.path.isfile(_piper_binary):
+        return _piper_binary
+
+    _piper_binary = _find_piper_binary()
+    if not _piper_binary:
+        _piper_binary = _download_piper_binary()
+
+    if not _piper_binary or not os.path.isfile(_piper_binary):
+        raise RuntimeError(
+            "Piper CLI binary not found. Please download from "
+            "https://github.com/rhasspy/piper/releases and place in: "
+            f"{PIPER_DIR}"
+        )
+    return _piper_binary
+
+
+def ensure_piper_model(voice_id: str = None) -> Path:
+    """Ensure Piper ONNX model is downloaded, return path to .onnx file."""
     if not voice_id:
         voice_id = TTS_MODEL_NAME
 
-    if voice_id not in _tts_models:
-        try:
-            voices_data = get_piper_voices_data()
-        except Exception:
-            voices_data = {}
-            
-        if voice_id not in voices_data and voice_id not in SUPPORTED_PIPER_VOICES:
-            log.warning(f"Voice {voice_id} unknown, falling back to {TTS_MODEL_NAME}")
-            voice_id = TTS_MODEL_NAME
+    model_path = TTS_DIR / f"{voice_id}.onnx"
+    config_path = TTS_DIR / f"{voice_id}.onnx.json"
 
-        _update_status("downloading_tts", 0.50, f"Loading Piper TTS ({voice_id})...")
-        from piper.voice import PiperVoice
+    if model_path.exists() and config_path.exists():
+        return model_path
+
+    _update_status("downloading_tts", 0.55, f"Downloading Piper model {voice_id} (~30MB)...")
+    import urllib.request
+
+    try:
+        voices_data = get_piper_voices_data()
+    except Exception:
+        voices_data = {}
+
+    if voice_id in voices_data:
+        files = voices_data[voice_id].get('files', {})
+        onnx_rel = next((p for p in files if p.endswith('.onnx')), None)
+        json_rel = next((p for p in files if p.endswith('.onnx.json')), None)
+        if not onnx_rel or not json_rel:
+            raise Exception(f"Missing model files in voices.json for {voice_id}")
+        base_repo = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+        url_onnx = base_repo + onnx_rel
+        url_json = base_repo + json_rel
+    elif voice_id in SUPPORTED_PIPER_VOICES:
+        base_url = SUPPORTED_PIPER_VOICES[voice_id]
+        url_onnx = base_url + ".onnx"
+        url_json = base_url + ".onnx.json"
+    else:
+        log.warning(f"Voice {voice_id} unknown, falling back to {TTS_MODEL_NAME}")
+        return ensure_piper_model(TTS_MODEL_NAME)
+
+    log.info("⬇️  Downloading model: %s", voice_id)
+    urllib.request.urlretrieve(url_onnx, str(model_path))
+    urllib.request.urlretrieve(url_json, str(config_path))
+    log.info("✅ Model downloaded: %s", model_path)
+
+    _model_status["tts_ready"] = True
+    _update_status("ready", 1.0, "✅ All models ready")
+    return model_path
+
+
+def run_piper_tts(text: str, output_wav: str, voice_id: str = None):
+    """
+    Chạy Piper CLI subprocess để synthesize text → WAV.
+    Cross-platform: macOS + Windows + Linux.
+    """
+    piper_bin = get_piper_binary()
+    model_path = ensure_piper_model(voice_id)
+
+    cmd = [
+        piper_bin,
+        "--model", str(model_path),
+        "--output_file", output_wav,
+    ]
+
+    log.info("🗣️  Piper CLI: %s", " ".join(cmd[:4]) + "...")
+
+    env = os.environ.copy()
+    if IS_MACOS:
+        # Giúp macOS tìm thấy các file .dylib bị thiếu trong bản release
+        bin_dir = str(Path(piper_bin).parent)
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = bin_dir
+        env["DYLD_LIBRARY_PATH"] = bin_dir
+
+    try:
+        # Piper CLI đọc theo từng dòng, cần thêm \n ở cuối để báo hiệu kết thúc dòng
+        input_bytes = (text.strip() + "\n").encode("utf-8")
         
-        model_path = TTS_DIR / f"{voice_id}.onnx"
-        if not model_path.exists():
-            _update_status("downloading_tts", 0.50, f"Downloading Piper TTS {voice_id} (~30MB)...")
-            import urllib.request
-            
-            # Resolve URLs
-            if voice_id in voices_data:
-                files = voices_data[voice_id].get('files', {})
-                onnx_rel = next((p for p in files if p.endswith('.onnx')), None)
-                json_rel = next((p for p in files if p.endswith('.onnx.json')), None)
-                if not onnx_rel or not json_rel:
-                    raise Exception(f"Missing model files for {voice_id}")
-                base_repo = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
-                url_onnx = base_repo + onnx_rel
-                url_json = base_repo + json_rel
-            else:
-                base_url = SUPPORTED_PIPER_VOICES[voice_id]
-                url_onnx = base_url + ".onnx"
-                url_json = base_url + ".onnx.json"
-                
-            urllib.request.urlretrieve(url_onnx, str(model_path))
-            urllib.request.urlretrieve(url_json, str(model_path.with_suffix(".onnx.json")))
-            
-        _tts_models[voice_id] = PiperVoice.load(str(model_path), str(model_path.with_suffix(".onnx.json")))
-        _model_status["tts_ready"] = True
-        _update_status("ready", 1.0, "✅ All models ready")
-    return _tts_models[voice_id]
+        result = subprocess.run(
+            cmd,
+            input=input_bytes,
+            capture_output=True,
+            timeout=120,
+            env=env
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            log.error("Piper CLI error (rc=%d): %s", result.returncode, stderr)
+            raise RuntimeError(f"Piper CLI failed (rc={result.returncode}): {stderr}")
+
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"Piper binary not found at: {piper_bin}. "
+            "Please download from https://github.com/rhasspy/piper/releases"
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Piper TTS timed out (>120s). Text may be too long.")
 
 
 # ────────────────────────────────────────────────────────────
@@ -402,13 +625,34 @@ def step_stt(mp3_path: Path, srt_path: Path) -> str:
     return srt_content
 
 
+def _fallback_macos_say(text: str, clip_path: Path):
+    """macOS-only fallback: use Apple's built-in 'say' command for TTS."""
+    if not IS_MACOS:
+        return None
+
+    aiff_path = str(clip_path).replace('.wav', '.aiff')
+    txt_path = str(clip_path).replace('.wav', '.txt')
+
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    try:
+        subprocess.run(["say", "-v", "Linh", "-o", aiff_path, "-f", txt_path],
+                       check=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        subprocess.run(["say", "-o", aiff_path, "-f", txt_path], check=True)
+
+    from pydub import AudioSegment
+    chunk_audio = AudioSegment.from_file(aiff_path, format="aiff")
+    chunk_audio.export(str(clip_path), format="wav")
+    return chunk_audio
+
+
 def step_tts(srt_content: str, output_dir: Path, tts_voice: str = None) -> list:
-    """Step 2: SRT text segments → individual WAV clips"""
-    log.info("🗣️  Step 2: Text-to-Speech (Piper)...")
-    tts = get_tts_model(tts_voice)
+    """Step 2: SRT text segments → individual WAV clips via Piper CLI"""
+    log.info("🗣️  Step 2: Text-to-Speech (Piper CLI)...")
     entries = parse_srt(srt_content)
     clips = []  # list of (start_sec, end_sec, wav_path)
-    import wave
 
     for i, (start, end, text) in enumerate(entries):
         text_chunks = chunk_text(text)
@@ -418,45 +662,32 @@ def step_tts(srt_content: str, output_dir: Path, tts_voice: str = None) -> list:
             clip_path = output_dir / f"clip_{i:04d}_{j:02d}.wav"
             log.info("   TTS [%d/%d] %.1fs→%.1fs: %s", i + 1, len(entries), start, end, chunk[:60])
             try:
-                # Remove digits before TTS to prevent Piper from crashing, 
+                # Remove digits before TTS to prevent Piper from crashing,
                 # especially for languages like Vietnamese that lack digit support.
-                import re
                 safe_chunk = re.sub(r'\d+', '', chunk).strip()
                 if not safe_chunk:
                     continue
-                    
-                # Piper synthesizes directly to a wav file
-                with wave.open(str(clip_path), "wb") as wav_file:
-                    wav_file.setnchannels(1)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(tts.config.sample_rate)
-                    tts.synthesize(safe_chunk, wav_file)
 
-                # Merge chunk clips if multiple
+                # Use Piper CLI subprocess
+                run_piper_tts(safe_chunk, str(clip_path), tts_voice)
+
                 from pydub import AudioSegment
-                chunk_audio = AudioSegment.from_wav(str(clip_path))
-                
+                if not clip_path.exists() or os.path.getsize(clip_path) <= 44:
+                    log.warning("   Piper produced empty output, trying fallback...")
+                    chunk_audio = _fallback_macos_say(chunk, clip_path)
+                    if chunk_audio is None:
+                        log.warning("   No fallback available on this platform, skipping chunk")
+                        continue
+                else:
+                    chunk_audio = AudioSegment.from_wav(str(clip_path))
+
                 if len(chunk_audio) == 0:
-                    # Piper failed silently (likely Mac ARM64 onnx/phonemize mismatch).
-                    # Fallback to Apple's built-in robust offline TTS ('say').
-                    import subprocess
-                    aiff_path = str(clip_path).replace('.wav', '.aiff')
-                    txt_path = str(clip_path).replace('.wav', '.txt')
-                    
-                    # Apple 'say' supports digits natively, so we use the ORIGINAL 'chunk'
-                    # We write to a text file to prevent command line flag injection (e.g. text starting with '-')
-                    with open(txt_path, "w", encoding="utf-8") as f:
-                        f.write(chunk)
-                    
-                    # Try to use Vietnamese voice 'Linh' if available, else default
-                    try:
-                        subprocess.run(["say", "-v", "Linh", "-o", aiff_path, "-f", txt_path], check=True, stderr=subprocess.DEVNULL)
-                    except:
-                        subprocess.run(["say", "-o", aiff_path, "-f", txt_path], check=True)
-                        
-                    chunk_audio = AudioSegment.from_file(aiff_path, format="aiff")
-                    chunk_audio.export(str(clip_path), format="wav") # save over as wav for consistency
-                
+                    # Try macOS 'say' fallback
+                    chunk_audio = _fallback_macos_say(chunk, clip_path)
+                    if chunk_audio is None or len(chunk_audio) == 0:
+                        log.warning("   Fallback also produced empty audio, skipping")
+                        continue
+
                 log.info(f"   --> Chunk audio length: {len(chunk_audio)} ms")
                 combined_audio = chunk_audio if combined_audio is None else combined_audio + chunk_audio
 
@@ -523,7 +754,8 @@ async def lifespan(app: FastAPI):
     def preload():
         try:
             get_whisper_model()
-            get_tts_model()
+            get_piper_binary()
+            ensure_piper_model()
             log.info("🟢 All models loaded. Backend READY at http://127.0.0.1:5000")
         except Exception as e:
             log.error("❌ Model preload failed: %s", e)
@@ -558,7 +790,8 @@ async def health():
     return {
         "status": "ok",
         "whisper_loaded": _whisper_model is not None,
-        "tts_loaded": _tts_model is not None,
+        "tts_loaded": _piper_binary is not None,
+        "platform": platform.system(),
     }
 
 
@@ -797,36 +1030,16 @@ async def run_tts(
         step_assemble(clips, total_duration, out_wav)
     else:
         log.info("Plain text detected in TTS input.")
-        tts = get_tts_model(tts_voice)
-        import wave
-        with wave.open(str(out_wav), "wb") as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(tts.config.sample_rate)
-            import re
-            safe_text = re.sub(r'\d+', '', text).strip()
-            if safe_text:
-                tts.synthesize(safe_text, wav_file)
-                
-        # Check if silent
-        from pydub import AudioSegment
-        import os
-        if not out_wav.exists() or os.path.getsize(out_wav) <= 44: # 44 bytes is empty WAV header
-            log.info("Piper failed silently for plain text. Falling back to Apple 'say'")
-            import subprocess
-            aiff_path = str(out_wav).replace('.wav', '.aiff')
-            txt_path = str(out_wav).replace('.wav', '.txt')
-            
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(text)
-                
-            try:
-                subprocess.run(["say", "-v", "Linh", "-o", aiff_path, "-f", txt_path], check=True, stderr=subprocess.DEVNULL)
-            except:
-                subprocess.run(["say", "-o", aiff_path, "-f", txt_path], check=True)
-                
-            chunk_audio = AudioSegment.from_file(aiff_path, format="aiff")
-            chunk_audio.export(str(out_wav), format="wav")
+        safe_text = re.sub(r'\d+', '', text).strip()
+        if safe_text:
+            run_piper_tts(safe_text, str(out_wav), tts_voice)
+
+        # Check if Piper produced empty/silent output
+        if not out_wav.exists() or os.path.getsize(out_wav) <= 44:
+            log.info("Piper produced empty output for plain text, trying fallback...")
+            fallback = _fallback_macos_say(text, out_wav)
+            if fallback is None:
+                raise HTTPException(500, "TTS produced empty output and no fallback available")
         
     return FileResponse(out_wav, media_type="audio/wav", filename="tts_output.wav")
 
