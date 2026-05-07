@@ -1,30 +1,51 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vocalizeai/main.dart';
+import 'package:vocalizeai/features/home/presentation/controllers/home_controller.dart';
+
+class MockHomeController extends HomeController {
+  MockHomeController(super.ref);
+
+  @override
+  Future<void> initBackend() async {
+    // Mock initialization: Do nothing to prevent actual HTTP calls during test.
+  }
+}
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('VocalizeAI app smoke test - renders HomePage and Tabs',
+      (WidgetTester tester) async {
+    // Build our app and trigger a frame with Mocked dependencies.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          homeControllerProvider.overrideWith((ref) => MockHomeController(ref)),
+          isBackendReadyProvider.overrideWith((ref) => true),
+        ],
+        child: const VocalizeAIApp(),
+      ),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Wait for go_router to settle
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Verify app title exists
+    expect(find.text('VocalizeAI'), findsOneWidget);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify the three tabs exist
+    expect(find.text('STT'), findsOneWidget);
+    expect(find.text('Translate'), findsOneWidget);
+    expect(find.text('TTS'), findsOneWidget);
+
+    // Verify STT tab content is visible (default tab)
+    expect(find.text('Extract Text (STT)'), findsOneWidget);
+
+    // Tap Translate tab
+    await tester.tap(find.text('Translate'));
+    await tester.pumpAndSettle();
+
+    // Verify Translate tab content is visible
+    expect(find.text('Translate Text'), findsOneWidget);
   });
 }
