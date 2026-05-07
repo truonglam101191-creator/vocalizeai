@@ -26,10 +26,31 @@ dependencies:
   audioplayers: ^6.1.0
   argos_translator_offline: ^1.2.0
 
+  # Architecture
+  flutter_riverpod: ^2.4.9
+  go_router: ^13.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/logo.jpg"
+  macos:
+    generate: true
+    image_path: "assets/images/logo.jpg"
+  windows:
+    generate: true
+    image_path: "assets/images/logo.jpg"
+  linux:
+    generate: true
+    image_path: "assets/images/logo.jpg"
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/
