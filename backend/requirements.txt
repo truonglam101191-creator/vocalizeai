@@ -21,4 +21,4 @@ pydub>=0.25.1
 # ── Utilities ──
 numpy<2.0
 spacy<3.8.0
-argostranslate==1.9.1
+argostranslate
