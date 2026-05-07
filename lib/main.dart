@@ -94,6 +94,9 @@ class BackendManager {
     }
     projectCandidates.add(Directory.current.path);
     if (Platform.isMacOS) {
+      // Khi chạy dưới dạng App Bundle (Release), file nằm trong Contents/MacOS, backend nằm trong Contents/Resources
+      projectCandidates.add(p.normalize(p.join(execDir, '..', 'Resources')));
+      // Đường dẫn tĩnh khi chạy Debug
       projectCandidates.add('/Users/macbook/Desktop/project/AI/vocalizeai');
     }
 
