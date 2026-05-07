@@ -6,6 +6,8 @@ import 'package:path/path.dart' as p;
 import '../../../../core/widgets/base_card.dart';
 import '../../../../core/widgets/base_button.dart';
 import '../controllers/stt_controller.dart';
+import '../../../translate/presentation/controllers/translate_controller.dart';
+import '../../../../core/l10n/locale_controller.dart';
 
 class SttTab extends ConsumerWidget {
   const SttTab({super.key});
@@ -14,6 +16,7 @@ class SttTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(sttControllerProvider);
     final controller = ref.read(sttControllerProvider.notifier);
+    final l10n = ref.watch(l10nProvider);
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -45,7 +48,7 @@ class SttTab extends ConsumerWidget {
                       Text(
                         state.selectedMp3 != null
                             ? p.basename(state.selectedMp3!)
-                            : 'Drop audio here or click to browse',
+                            : l10n.get('dropAudio'),
                         style: GoogleFonts.inter(
                           color: state.selectedMp3 != null
                               ? Colors.white
@@ -70,7 +73,7 @@ class SttTab extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           BaseButton(
-            text: 'Extract Text (STT)',
+            text: l10n.get('extractTextStt'),
             icon: Icons.auto_awesome_rounded,
             isLoading: state.isProcessing,
             onPressed: state.selectedMp3 == null || state.isProcessing
@@ -94,7 +97,7 @@ class SttTab extends ConsumerWidget {
                       const Icon(Icons.check_circle_rounded,
                           color: Colors.greenAccent, size: 20),
                       const SizedBox(width: 8),
-                      Text('Subtitles (SRT)',
+                      Text(l10n.get('subtitlesSrt'),
                           style: GoogleFonts.inter(
                               fontWeight: FontWeight.w600,
                               color: Colors.white)),
@@ -102,12 +105,13 @@ class SttTab extends ConsumerWidget {
                       IconButton(
                         icon: const Icon(Icons.copy_rounded,
                             color: Color(0xFF06B6D4), size: 20),
-                        tooltip: 'Copy subtitles',
+                        tooltip: l10n.get('copySubtitles'),
                         onPressed: () {
-                          Clipboard.setData(ClipboardData(text: state.outputText));
+                          Clipboard.setData(
+                              ClipboardData(text: state.outputText));
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Subtitles copied to clipboard!',
+                              content: Text(l10n.get('subtitlesCopied'),
                                   style: GoogleFonts.inter()),
                               backgroundColor: const Color(0xFF10B981),
                               duration: const Duration(seconds: 1),
@@ -122,6 +126,29 @@ class SttTab extends ConsumerWidget {
                     state.outputText,
                     style: GoogleFonts.jetBrainsMono(
                         color: Colors.white70, fontSize: 13, height: 1.5),
+                  ),
+                  const SizedBox(height: 24),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        ref.read(translateInputProvider).text =
+                            state.outputText;
+                        DefaultTabController.of(context).animateTo(1);
+                      },
+                      icon: const Icon(Icons.send_rounded),
+                      label: Text(l10n.get('sendToTranslate'),
+                          style:
+                              GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF06B6D4),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
                   ),
                 ],
               ),

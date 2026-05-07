@@ -43,35 +43,43 @@ class _AnimatedBackgroundState extends State<AnimatedBackground>
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF0A0A14), Color(0xFF0D0820), Color(0xFF0A1428)],
-            ),
+        RepaintBoundary(
+          child: Stack(
+            children: [
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF0A0A14), Color(0xFF0D0820), Color(0xFF0A1428)],
+                  ),
+                ),
+              ),
+              AnimatedBuilder(
+                animation: _bgAnimCtrl,
+                builder: (ctx, child) {
+                  return Stack(
+                    children: [
+                      Positioned(
+                        top: -50 + (_bgAnimCtrl.value * 30),
+                        right: -100 - (_bgAnimCtrl.value * 20),
+                        child: _buildOrb(const Color(0xFF7C3AED).withOpacity(0.4), 350),
+                      ),
+                      Positioned(
+                        bottom: -100 + (_bgAnimCtrl.value * 40),
+                        left: -50 - (_bgAnimCtrl.value * 20),
+                        child: _buildOrb(const Color(0xFF0891B2).withOpacity(0.3), 400),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ],
           ),
         ),
-        AnimatedBuilder(
-          animation: _bgAnimCtrl,
-          builder: (ctx, child) {
-            return Stack(
-              children: [
-                Positioned(
-                  top: -50 + (_bgAnimCtrl.value * 30),
-                  right: -100 - (_bgAnimCtrl.value * 20),
-                  child: _buildOrb(const Color(0xFF7C3AED).withOpacity(0.4), 350),
-                ),
-                Positioned(
-                  bottom: -100 + (_bgAnimCtrl.value * 40),
-                  left: -50 - (_bgAnimCtrl.value * 20),
-                  child: _buildOrb(const Color(0xFF0891B2).withOpacity(0.3), 400),
-                ),
-              ],
-            );
-          },
+        RepaintBoundary(
+          child: widget.child,
         ),
-        widget.child,
       ],
     );
   }

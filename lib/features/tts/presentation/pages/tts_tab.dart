@@ -7,6 +7,7 @@ import 'package:audioplayers/audioplayers.dart';
 import '../../../../core/widgets/base_card.dart';
 import '../../../../core/widgets/base_button.dart';
 import '../controllers/tts_controller.dart';
+import '../../../../core/l10n/locale_controller.dart';
 
 class TtsTab extends ConsumerStatefulWidget {
   const TtsTab({super.key});
@@ -56,10 +57,14 @@ class _TtsTabState extends ConsumerState<TtsTab> {
 
   void _changeSpeed(AudioPlayer player) {
     setState(() {
-      if (_playbackRate == 1.0) _playbackRate = 1.25;
-      else if (_playbackRate == 1.25) _playbackRate = 1.5;
-      else if (_playbackRate == 1.5) _playbackRate = 2.0;
-      else _playbackRate = 1.0;
+      if (_playbackRate == 1.0)
+        _playbackRate = 1.25;
+      else if (_playbackRate == 1.25)
+        _playbackRate = 1.5;
+      else if (_playbackRate == 1.5)
+        _playbackRate = 2.0;
+      else
+        _playbackRate = 1.0;
     });
     player.setPlaybackRate(_playbackRate);
   }
@@ -77,243 +82,317 @@ class _TtsTabState extends ConsumerState<TtsTab> {
     final controller = ref.read(ttsControllerProvider.notifier);
     final textCtrl = ref.watch(ttsInputProvider);
     final player = ref.watch(audioPlayerProvider);
+    final l10n = ref.watch(l10nProvider);
 
-    return SingleChildScrollView(
+    return CustomScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          BaseCard(
-            padding: const EdgeInsets.all(4),
-            child: Stack(
-              children: [
-                TextField(
-                  controller: textCtrl,
-                  maxLines: 6,
-                  style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
-                  decoration: const InputDecoration(
-                    hintText: 'Paste translated SRT or plain text here...',
-                    hintStyle: TextStyle(color: Colors.white30),
-                    contentPadding: EdgeInsets.only(left: 20, right: 48, top: 20, bottom: 20),
-                    border: InputBorder.none,
-                  ),
-                ),
-                Positioned(
-                  right: 4,
-                  top: 4,
-                  child: IconButton(
-                    icon: const Icon(Icons.copy_rounded, color: Color(0xFF06B6D4), size: 20),
-                    tooltip: 'Copy content',
-                    onPressed: () {
-                      if (textCtrl.text.isNotEmpty) {
-                        Clipboard.setData(ClipboardData(text: textCtrl.text));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Copied to clipboard!', style: GoogleFonts.inter()),
-                            backgroundColor: const Color(0xFF10B981),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ),
-                Positioned(
-                  right: 4,
-                  bottom: 4,
-                  child: IconButton(
-                    icon: const Icon(Icons.clear_all_rounded, color: Colors.white30, size: 20),
-                    tooltip: 'Clear content',
-                    onPressed: () => textCtrl.clear(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          if (state.voices.isNotEmpty)
-            BaseCard(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: state.selectedVoice,
-                  isExpanded: true,
-                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFFF59E0B)),
-                  dropdownColor: const Color(0xFF1E1E2C),
-                  style: GoogleFonts.inter(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
-                  onChanged: (v) {
-                    if (v != null) controller.setSelectedVoice(v);
-                  },
-                  items: state.voices.map((v) {
-                    return DropdownMenuItem(value: v['id'], child: Text(v['name']!));
-                  }).toList(),
-                ),
-              ),
-            ),
-          const SizedBox(height: 24),
-          BaseButton(
-            text: 'Generate Audio (TTS)',
-            icon: Icons.record_voice_over_rounded,
-            isLoading: state.isProcessing,
-            onPressed: state.isProcessing ? null : () => controller.runTts(textCtrl.text, player),
-            gradient: const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]),
-          ),
-          if (state.outputWavPath != null) ...[
-            const SizedBox(height: 24),
-            BaseCard(
-              child: Column(
-                children: [
-                  Icon(
-                    _isPlaying ? Icons.multitrack_audio_rounded : Icons.audio_file_rounded,
-                    color: const Color(0xFF10B981),
-                    size: 56,
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Studio Audio Ready',
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.white)),
-                  const SizedBox(height: 4),
-                  Text(p.basename(state.outputWavPath!),
-                      style: GoogleFonts.inter(color: Colors.white54, fontSize: 12)),
-                  const SizedBox(height: 16),
-                  SliderTheme(
-                    data: SliderThemeData(
-                      trackHeight: 4,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                    ),
-                    child: Slider(
-                      value: _position.inSeconds.toDouble().clamp(
-                          0.0, _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0),
-                      max: _duration.inSeconds.toDouble() > 0 ? _duration.inSeconds.toDouble() : 1.0,
-                      onChanged: (val) => player.seek(Duration(seconds: val.toInt())),
-                      activeColor: const Color(0xFF10B981),
-                      inactiveColor: Colors.white24,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(_formatDuration(_position),
-                            style: GoogleFonts.jetBrainsMono(color: Colors.white54, fontSize: 12)),
-                        Text(_formatDuration(_duration),
-                            style: GoogleFonts.jetBrainsMono(color: Colors.white54, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      InkWell(
-                        onTap: () => _changeSpeed(player),
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.05)),
-                          child: Text('${_playbackRate}x',
-                              style: GoogleFonts.inter(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 13)),
-                        ),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.all(24),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              BaseCard(
+                padding: const EdgeInsets.all(4),
+                child: Stack(
+                  children: [
+                    TextField(
+                      controller: textCtrl,
+                      maxLines: 6,
+                      style:
+                          GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: l10n.get('pasteTranslatedSrt'),
+                        hintStyle: const TextStyle(color: Colors.white30),
+                        contentPadding: const EdgeInsets.only(
+                            left: 20, right: 48, top: 20, bottom: 20),
+                        border: InputBorder.none,
                       ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 32),
-                        onPressed: () => _seekBackward(player),
-                      ),
-                      const SizedBox(width: 16),
-                      InkWell(
-                        onTap: () {
-                          if (_isPlaying) {
-                            player.pause();
-                          } else {
-                            if (_position > Duration.zero && _position < _duration) {
-                              player.resume();
-                              player.setPlaybackRate(_playbackRate);
-                            } else {
-                              player.play(DeviceFileSource(state.outputWavPath!));
-                              player.setPlaybackRate(_playbackRate);
-                            }
+                    ),
+                    Positioned(
+                      right: 4,
+                      top: 4,
+                      child: IconButton(
+                        icon: const Icon(Icons.copy_rounded,
+                            color: Color(0xFF06B6D4), size: 20),
+                        tooltip: l10n.get('copyContent'),
+                        onPressed: () {
+                          if (textCtrl.text.isNotEmpty) {
+                            Clipboard.setData(
+                                ClipboardData(text: textCtrl.text));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(l10n.get('copiedToClipboard'),
+                                    style: GoogleFonts.inter()),
+                                backgroundColor: const Color(0xFF10B981),
+                                duration: const Duration(seconds: 1),
+                              ),
+                            );
                           }
                         },
-                        borderRadius: BorderRadius.circular(30),
-                        child: Container(
-                          width: 64,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-                            boxShadow: [
-                              BoxShadow(color: const Color(0xFF10B981).withOpacity(0.4), blurRadius: 12, spreadRadius: 2),
-                            ],
-                          ),
-                          child: Icon(_isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 36),
+                      ),
+                    ),
+                    Positioned(
+                      right: 4,
+                      bottom: 4,
+                      child: IconButton(
+                        icon: const Icon(Icons.clear_all_rounded,
+                            color: Colors.white30, size: 20),
+                        tooltip: l10n.get('clearContent'),
+                        onPressed: () => textCtrl.clear(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              if (state.voices.isNotEmpty)
+                BaseCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: state.selectedVoice,
+                      isExpanded: true,
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                          color: Color(0xFFF59E0B)),
+                      dropdownColor: const Color(0xFF1E1E2C),
+                      style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500),
+                      onChanged: (v) {
+                        if (v != null) controller.setSelectedVoice(v);
+                      },
+                      items: state.voices.map((v) {
+                        return DropdownMenuItem(
+                            value: v['id'], child: Text(v['name']!));
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 24),
+              BaseButton(
+                text: l10n.get('generateAudioTts'),
+                icon: Icons.record_voice_over_rounded,
+                isLoading: state.isProcessing,
+                onPressed: state.isProcessing
+                    ? null
+                    : () => controller.runTts(textCtrl.text, player),
+                gradient: const LinearGradient(
+                    colors: [Color(0xFFF59E0B), Color(0xFFD97706)]),
+              ),
+              if (state.outputWavPath != null) ...[
+                const SizedBox(height: 24),
+                BaseCard(
+                  child: Column(
+                    children: [
+                      Icon(
+                        _isPlaying
+                            ? Icons.multitrack_audio_rounded
+                            : Icons.audio_file_rounded,
+                        color: const Color(0xFF10B981),
+                        size: 56,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(l10n.get('studioAudioReady'),
+                          style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                              color: Colors.white)),
+                      const SizedBox(height: 4),
+                      Text(p.basename(state.outputWavPath!),
+                          style: GoogleFonts.inter(
+                              color: Colors.white54, fontSize: 12)),
+                      const SizedBox(height: 16),
+                      SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 4,
+                          thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 6),
+                          overlayShape:
+                              const RoundSliderOverlayShape(overlayRadius: 14),
+                        ),
+                        child: Slider(
+                          value: _position.inSeconds.toDouble().clamp(
+                              0.0,
+                              _duration.inSeconds.toDouble() > 0
+                                  ? _duration.inSeconds.toDouble()
+                                  : 1.0),
+                          max: _duration.inSeconds.toDouble() > 0
+                              ? _duration.inSeconds.toDouble()
+                              : 1.0,
+                          onChanged: (val) =>
+                              player.seek(Duration(seconds: val.toInt())),
+                          activeColor: const Color(0xFF10B981),
+                          inactiveColor: Colors.white24,
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 32),
-                        onPressed: () => _seekForward(player),
-                      ),
-                      const SizedBox(width: 48),
-                    ],
-                  )
-                ],
-              ),
-            )
-          ],
-          if (state.outputFiles.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Icon(Icons.folder_copy_rounded, color: Colors.white70, size: 20),
-                const SizedBox(width: 8),
-                Text('Generated Audios',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: Colors.white)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: state.outputFiles.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final path = state.outputFiles[index];
-                return BaseCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.audiotrack_rounded, color: Color(0xFFF59E0B), size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(p.basename(path),
-                                style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 14)),
-                            Text(path,
-                                style: GoogleFonts.inter(color: Colors.white30, fontSize: 11),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
+                            Text(_formatDuration(_position),
+                                style: GoogleFonts.jetBrainsMono(
+                                    color: Colors.white54, fontSize: 12)),
+                            Text(_formatDuration(_duration),
+                                style: GoogleFonts.jetBrainsMono(
+                                    color: Colors.white54, fontSize: 12)),
                           ],
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.folder_open_rounded, color: Colors.white70, size: 20),
-                        tooltip: 'Open folder',
-                        onPressed: () => controller.openFolder(path),
-                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          InkWell(
+                            onTap: () => _changeSpeed(player),
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white.withOpacity(0.05)),
+                              child: Text('${_playbackRate}x',
+                                  style: GoogleFonts.inter(
+                                      color: Colors.white70,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13)),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          IconButton(
+                            icon: const Icon(Icons.replay_10_rounded,
+                                color: Colors.white70, size: 32),
+                            onPressed: () => _seekBackward(player),
+                          ),
+                          const SizedBox(width: 16),
+                          InkWell(
+                            onTap: () {
+                              if (_isPlaying) {
+                                player.pause();
+                              } else {
+                                if (_position > Duration.zero &&
+                                    _position < _duration) {
+                                  player.resume();
+                                  player.setPlaybackRate(_playbackRate);
+                                } else {
+                                  player.play(
+                                      DeviceFileSource(state.outputWavPath!));
+                                  player.setPlaybackRate(_playbackRate);
+                                }
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(30),
+                            child: Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: const LinearGradient(colors: [
+                                  Color(0xFF10B981),
+                                  Color(0xFF059669)
+                                ]),
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: const Color(0xFF10B981)
+                                          .withOpacity(0.4),
+                                      blurRadius: 12,
+                                      spreadRadius: 2),
+                                ],
+                              ),
+                              child: Icon(
+                                  _isPlaying
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                  color: Colors.white,
+                                  size: 36),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          IconButton(
+                            icon: const Icon(Icons.forward_10_rounded,
+                                color: Colors.white70, size: 32),
+                            onPressed: () => _seekForward(player),
+                          ),
+                          const SizedBox(width: 48),
+                        ],
+                      )
                     ],
                   ),
-                );
-              },
+                )
+              ],
+              if (state.outputFiles.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    const Icon(Icons.folder_copy_rounded,
+                        color: Colors.white70, size: 20),
+                    const SizedBox(width: 8),
+                    Text(l10n.get('generatedAudios'),
+                        style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600, color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const SizedBox(height: 16),
+              ]
+            ]),
+          ),
+        ),
+        if (state.outputFiles.isNotEmpty)
+          SliverPadding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 24).copyWith(bottom: 24),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final path = state.outputFiles[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: BaseCard(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.audiotrack_rounded,
+                              color: Color(0xFFF59E0B), size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(p.basename(path),
+                                    style: GoogleFonts.inter(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 14)),
+                                Text(path,
+                                    style: GoogleFonts.inter(
+                                        color: Colors.white30, fontSize: 11),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.folder_open_rounded,
+                                color: Colors.white70, size: 20),
+                            tooltip: l10n.get('openFolder'),
+                            onPressed: () => controller.openFolder(path),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+                childCount: state.outputFiles.length,
+              ),
             ),
-          ]
-        ],
-      ),
+          ),
+      ],
     );
   }
 }

@@ -648,59 +648,75 @@ def _fallback_macos_say(text: str, clip_path: Path):
     return chunk_audio
 
 
+def _process_tts_entry(task_info):
+    i, start, end, text, output_dir, tts_voice, total_entries = task_info
+    log.info("   TTS [%d/%d] %.1fs→%.1fs: %s", i + 1, total_entries, start, end, text[:60].replace("\n", " "))
+    
+    text_chunks = chunk_text(text)
+    combined_audio = None
+    
+    from pydub import AudioSegment
+    import os
+    import re
+    
+    for j, chunk in enumerate(text_chunks):
+        clip_path = output_dir / f"clip_{i:04d}_{j:02d}.wav"
+        try:
+            safe_chunk = re.sub(r'\d+', '', chunk).strip()
+            if not safe_chunk:
+                continue
+
+            run_piper_tts(safe_chunk, str(clip_path), tts_voice)
+
+            if not clip_path.exists() or os.path.getsize(clip_path) <= 44:
+                log.warning("   Piper produced empty output, trying fallback...")
+                chunk_audio = _fallback_macos_say(chunk, clip_path)
+                if chunk_audio is None:
+                    log.warning("   No fallback available on this platform, skipping chunk")
+                    continue
+            else:
+                chunk_audio = AudioSegment.from_wav(str(clip_path))
+
+            if len(chunk_audio) == 0:
+                chunk_audio = _fallback_macos_say(chunk, clip_path)
+                if chunk_audio is None or len(chunk_audio) == 0:
+                    log.warning("   Fallback also produced empty audio, skipping")
+                    continue
+
+            log.info(f"   --> Chunk audio length: {len(chunk_audio)} ms")
+            combined_audio = chunk_audio if combined_audio is None else combined_audio + chunk_audio
+            
+        except Exception as e:
+            err_msg = str(e)
+            log.error("   ❌ TTS failed for chunk: %s | error: %s", chunk[:40], err_msg)
+            raise Exception(f"TTS failed: {err_msg}")
+
+    if combined_audio is not None:
+        merged_path = output_dir / f"clip_{i:04d}.wav"
+        combined_audio.export(str(merged_path), format="wav")
+        log.info(f"✅ Entry {i+1}/{total_entries} combined audio length: {len(combined_audio)} ms")
+        return (i, start, end, merged_path)
+    return None
+
+
 def step_tts(srt_content: str, output_dir: Path, tts_voice: str = None) -> list:
-    """Step 2: SRT text segments → individual WAV clips via Piper CLI"""
-    log.info("🗣️  Step 2: Text-to-Speech (Piper CLI)...")
+    """Step 2: SRT text segments → individual WAV clips via Parallel Piper CLI"""
+    log.info("🗣️  Step 2: Text-to-Speech (Parallel Piper CLI)...")
     entries = parse_srt(srt_content)
     clips = []  # list of (start_sec, end_sec, wav_path)
 
-    for i, (start, end, text) in enumerate(entries):
-        text_chunks = chunk_text(text)
-        combined_audio = None
-
-        for j, chunk in enumerate(text_chunks):
-            clip_path = output_dir / f"clip_{i:04d}_{j:02d}.wav"
-            log.info("   TTS [%d/%d] %.1fs→%.1fs: %s", i + 1, len(entries), start, end, chunk[:60])
-            try:
-                # Remove digits before TTS to prevent Piper from crashing,
-                # especially for languages like Vietnamese that lack digit support.
-                safe_chunk = re.sub(r'\d+', '', chunk).strip()
-                if not safe_chunk:
-                    continue
-
-                # Use Piper CLI subprocess
-                run_piper_tts(safe_chunk, str(clip_path), tts_voice)
-
-                from pydub import AudioSegment
-                if not clip_path.exists() or os.path.getsize(clip_path) <= 44:
-                    log.warning("   Piper produced empty output, trying fallback...")
-                    chunk_audio = _fallback_macos_say(chunk, clip_path)
-                    if chunk_audio is None:
-                        log.warning("   No fallback available on this platform, skipping chunk")
-                        continue
-                else:
-                    chunk_audio = AudioSegment.from_wav(str(clip_path))
-
-                if len(chunk_audio) == 0:
-                    # Try macOS 'say' fallback
-                    chunk_audio = _fallback_macos_say(chunk, clip_path)
-                    if chunk_audio is None or len(chunk_audio) == 0:
-                        log.warning("   Fallback also produced empty audio, skipping")
-                        continue
-
-                log.info(f"   --> Chunk audio length: {len(chunk_audio)} ms")
-                combined_audio = chunk_audio if combined_audio is None else combined_audio + chunk_audio
-
-            except Exception as e:
-                err_msg = str(e)
-                log.error("   ❌ TTS failed for chunk: %s | error: %s", chunk[:40], err_msg)
-                raise Exception(f"TTS failed: {err_msg}")
-
-        if combined_audio is not None:
-            merged_path = output_dir / f"clip_{i:04d}.wav"
-            combined_audio.export(str(merged_path), format="wav")
-            log.info(f"✅ Entry {i} combined audio length: {len(combined_audio)} ms")
-            clips.append((start, end, merged_path))
+    import concurrent.futures
+    import multiprocessing
+    max_workers = min(4, max(1, multiprocessing.cpu_count() // 2))
+    
+    tasks = [(i, start, end, text, output_dir, tts_voice, len(entries)) 
+             for i, (start, end, text) in enumerate(entries)]
+             
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_process_tts_entry, tasks))
+        
+    for res in sorted([r for r in results if r is not None], key=lambda x: x[0]):
+        clips.append((res[1], res[2], res[3]))
 
     log.info("✅ Generated %d audio clips", len(clips))
     return clips

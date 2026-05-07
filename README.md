@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://img.icons8.com/color/96/000000/voice-recognition.png" alt="VocalizeAI Logo" />
+  <img src="https://github.com/truonglam101191-creator/vocalizeai/blob/main/assets/images/logo.jpg" alt="VocalizeAI Logo" />
   <h1>VocalizeAI</h1>
   <p><strong>Nền tảng Xử lý Đa phương tiện Ngoại tuyến Chuyên nghiệp: Speech-to-Text, Dịch thuật & Text-to-Speech</strong></p>
   
@@ -25,10 +25,12 @@
 <ul>
   <li>🎙️ <b>Speech-to-Text (STT):</b> Trích xuất văn bản và tạo phụ đề tự động (SRT) từ các tệp âm thanh (MP3, WAV, M4A, FLAC) sử dụng mô hình faster-whisper tối ưu.</li>
   <li>🌍 <b>Dịch thuật (Translate):</b> Dịch văn bản ngoại tuyến hỗ trợ nhiều ngôn ngữ (Tiếng Anh, Tiếng Việt, Tiếng Pháp, Tiếng Tây Ban Nha, Tiếng Trung).</li>
-  <li>🗣️ <b>Text-to-Speech (TTS):</b> Tạo các đoạn âm thanh chất lượng cao từ văn bản hoặc tệp SRT sử dụng Piper TTS, hỗ trợ nhiều giọng đọc khác nhau.</li>
-  <li>⚡ <b>Xử Lý Ngoại Tuyến (Offline):</b> Toàn bộ mô hình được tải xuống và lưu trữ cache cục bộ, đảm bảo không phụ thuộc vào kết nối mạng sau lần cài đặt đầu tiên.</li>
-  <li>🎨 <b>Giao Diện Cao Cấp (Premium UI/UX):</b> Thiết kế Glassmorphism tuyệt đẹp với hình nền động (animated backgrounds) và theo dõi trạng thái hệ thống theo thời gian thực.</li>
-  <li>⚙️ <b>Quản Lý Backend Tự Động:</b> Ứng dụng Flutter tự động khởi chạy và quản lý vòng đời của máy chủ AI Python ngầm, người dùng không cần chạy lệnh thủ công.</li>
+  <li>🗣️ <b>Text-to-Speech Đa Luồng (Multithreaded TTS):</b> Chạy song song nhiều tiến trình Piper TTS giúp tăng tốc độ kết xuất âm thanh lên gấp 3 lần, cho ra file WAV chất lượng phòng thu chỉ trong chớp mắt.</li>
+  <li>⚡ <b>Xử Lý Ngoại Tuyến (Offline):</b> Toàn bộ mô hình được tải xuống và lưu trữ cache cục bộ, đảm bảo không phụ thuộc vào kết nối mạng.</li>
+  <li>🎨 <b>Giao Diện Tối Ưu (Premium & Fast UI):</b> Thiết kế Glassmorphism tuyệt đẹp, cách ly render hoạt ảnh nền (RepaintBoundary) và tải nội dung lười (SliverList) đảm bảo trải nghiệm 60fps mượt mà không giật lag.</li>
+  <li>🔄 <b>Quy trình Liền mạch (Seamless Pipeline):</b> Dữ liệu được luân chuyển trực tiếp! Chỉ với 1 nút bấm, bạn có thể gửi phụ đề nhận diện từ STT sang Translate, rồi gửi thẳng bản dịch qua TTS để tạo giọng nói mà không cần Copy/Paste.</li>
+  <li>🌐 <b>Đa Ngôn Ngữ Thông Minh (i18n):</b> Chuyển đổi giao diện tức thì giữa Tiếng Anh (🇺🇸 EN) và Tiếng Việt (🇻🇳 VI). Ứng dụng sẽ tự động lưu và ghi nhớ thiết lập của bạn cho những lần mở sau.</li>
+  <li>⚙️ <b>Quản Lý Backend Tự Động:</b> Ứng dụng Flutter tự động khởi chạy và quản lý vòng đời của máy chủ AI Python ngầm.</li>
 </ul>
 
 <h2>🛠️ Kiến Trúc Hệ Thống</h2>
