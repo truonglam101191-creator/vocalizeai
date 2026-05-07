@@ -1,0 +1,78 @@
+name: macOS Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags, e.g., v1.0.0
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Build & Release macOS App
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: brew install ffmpeg
+
+      - name: Build Python Backend
+        run: |
+          cd backend
+          bash build.sh
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Flutter Dependencies
+        run: flutter pub get
+
+      - name: Build Flutter macOS App
+        run: flutter build macos --release
+
+      - name: Bundle Backend into App
+        run: |
+          # Find the generated .app bundle
+          APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" | head -n 1)
+          echo "Found app at: $APP_PATH"
+          
+          # Create backend directory inside the .app bundle's Resources folder
+          # This matches BackendManager's path logic: p.join(execDir, '..', 'Resources', 'backend', 'vocalizeai_backend')
+          mkdir -p "$APP_PATH/Contents/Resources/backend"
+          
+          # Copy the PyInstaller executable into the bundle
+          cp backend/dist/vocalizeai_backend "$APP_PATH/Contents/Resources/backend/"
+
+      - name: Compress App Bundle
+        run: |
+          APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" | head -n 1)
+          APP_DIR=$(dirname "$APP_PATH")
+          APP_NAME=$(basename "$APP_PATH")
+          
+          # Change to the directory containing the .app to zip it cleanly
+          cd "$APP_DIR"
+          zip -r "VocalizeAI-macOS.zip" "$APP_NAME"
+          
+          # Move it to workspace root for uploading
+          mv "VocalizeAI-macOS.zip" $GITHUB_WORKSPACE/
+
+      - name: Release to GitHub
+        uses: softprops/action-gh-release@v2
+        # Only create a release automatically if triggered by a tag push
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: VocalizeAI-macOS.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
