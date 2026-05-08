@@ -123,7 +123,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                     spreadRadius: 2),
               ],
             ),
-            child: const Icon(Icons.graphic_eq, color: Colors.white, size: 28),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(
+                'assets/images/logo.jpg',
+                fit: BoxFit.cover,
+              ),
+            ),
           ),
           const SizedBox(width: 16),
           Column(

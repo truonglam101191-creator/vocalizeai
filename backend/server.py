@@ -1050,7 +1050,8 @@ async def run_stt(file: UploadFile = File(...), whisper_model: str = Form(None))
     content = await file.read()
     mp3_path.write_bytes(content)
     
-    srt_content = step_stt(mp3_path, srt_path, whisper_model)
+    import asyncio
+    srt_content = await asyncio.to_thread(step_stt, mp3_path, srt_path, whisper_model)
     
     # Extract plain text from SRT for easier use in Translate tab
     entries = parse_srt(srt_content)
@@ -1169,6 +1170,7 @@ async def run_tts(
     out_wav = job_dir / "tts_output.wav"
     
     # Check if input is SRT
+    import asyncio
     if "-->" in text:
         log.info("SRT format detected in TTS input.")
         entries = parse_srt(text)
@@ -1177,18 +1179,18 @@ async def run_tts(
         total_duration = max(e[1] for e in entries) + 1.0
         clips_dir = job_dir / "clips"
         clips_dir.mkdir(parents=True, exist_ok=True)
-        clips = step_tts(text, clips_dir, tts_voice)
-        step_assemble(clips, total_duration, out_wav)
+        clips = await asyncio.to_thread(step_tts, text, clips_dir, tts_voice)
+        await asyncio.to_thread(step_assemble, clips, total_duration, out_wav)
     else:
         log.info("Plain text detected in TTS input.")
         safe_text = re.sub(r'\d+', '', text).strip()
         if safe_text:
-            run_piper_tts(safe_text, str(out_wav), tts_voice)
+            await asyncio.to_thread(run_piper_tts, safe_text, str(out_wav), tts_voice)
 
         # Check if Piper produced empty/silent output
         if not out_wav.exists() or os.path.getsize(out_wav) <= 44:
             log.info("Piper produced empty output for plain text, trying fallback...")
-            fallback = _fallback_macos_say(text, out_wav)
+            fallback = await asyncio.to_thread(_fallback_macos_say, text, out_wav)
             if fallback is None:
                 raise HTTPException(500, "TTS produced empty output and no fallback available")
         
@@ -1234,16 +1236,19 @@ async def run_pipeline(
             speaker_path.write_bytes(speaker_content)
             log.info("🎤 Speaker sample saved for voice cloning")
 
+        import asyncio
+
         # ── Step 1: STT ──
-        srt_content = step_stt(mp3_path, srt_path, whisper_model)
+        srt_content = await asyncio.to_thread(step_stt, mp3_path, srt_path, whisper_model)
 
         # ── Step 2: TTS ──
         clips_dir = job_dir / "clips"
         clips_dir.mkdir(exist_ok=True)
-        clips = step_tts(
+        clips = await asyncio.to_thread(
+            step_tts,
             srt_content,
             clips_dir,
-            tts_voice=tts_voice,
+            tts_voice
         )
 
         if not clips:
@@ -1251,7 +1256,7 @@ async def run_pipeline(
 
         # ── Step 3: Assemble ──
         last_end = max(end for _, end, _ in clips)
-        step_assemble(clips, last_end, final_wav)
+        await asyncio.to_thread(step_assemble, clips, last_end, final_wav)
 
         # Schedule cleanup after response
         if background_tasks:
