@@ -46,7 +46,7 @@ class TranslateController extends StateNotifier<TranslateState> {
     state = state.copyWith(isProcessing: true, error: '');
     try {
       final req = http.MultipartRequest(
-          'POST', Uri.parse('http://127.0.0.1:5000/translate'));
+          'POST', Uri.parse('http://127.0.0.1:5055/translate'));
       req.fields['text'] = text;
       req.fields['from_lang'] = state.fromLang;
       req.fields['to_lang'] = state.toLang;

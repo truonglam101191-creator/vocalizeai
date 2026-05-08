@@ -1,27 +1,32 @@
 class SttState {
   final bool isProcessing;
-  final String? selectedMp3;
-  final String outputText;
-  final String error;
+  final List<String> selectedFiles;
+  final Map<String, String> outputs;
+  final Map<String, String> errors;
+  final String? currentProcessingFile;
 
   const SttState({
     this.isProcessing = false,
-    this.selectedMp3,
-    this.outputText = '',
-    this.error = '',
+    this.selectedFiles = const [],
+    this.outputs = const {},
+    this.errors = const {},
+    this.currentProcessingFile,
   });
 
   SttState copyWith({
     bool? isProcessing,
-    String? selectedMp3,
-    String? outputText,
-    String? error,
+    List<String>? selectedFiles,
+    Map<String, String>? outputs,
+    Map<String, String>? errors,
+    String? currentProcessingFile,
+    bool clearCurrentFile = false,
   }) {
     return SttState(
       isProcessing: isProcessing ?? this.isProcessing,
-      selectedMp3: selectedMp3 ?? this.selectedMp3,
-      outputText: outputText ?? this.outputText,
-      error: error ?? this.error,
+      selectedFiles: selectedFiles ?? this.selectedFiles,
+      outputs: outputs ?? this.outputs,
+      errors: errors ?? this.errors,
+      currentProcessingFile: clearCurrentFile ? null : (currentProcessingFile ?? this.currentProcessingFile),
     );
   }
 }

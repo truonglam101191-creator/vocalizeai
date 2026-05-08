@@ -11,33 +11,59 @@ class SttController extends StateNotifier<SttState> {
   SttController() : super(const SttState());
 
   Future<void> pickFile() async {
-    final res = await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (res != null && res.files.single.path != null) {
+    final res = await FilePicker.platform.pickFiles(type: FileType.audio, allowMultiple: true);
+    if (res != null && res.files.isNotEmpty) {
+      final paths = res.files.map((e) => e.path!).toList();
       state = state.copyWith(
-          selectedMp3: res.files.single.path, outputText: '', error: '');
+          selectedFiles: paths, outputs: {}, errors: {}, clearCurrentFile: true);
     }
   }
 
+  void removeFile(String path) {
+    if (state.isProcessing) return;
+    final newFiles = List<String>.from(state.selectedFiles)..remove(path);
+    final newOutputs = Map<String, String>.from(state.outputs)..remove(path);
+    final newErrors = Map<String, String>.from(state.errors)..remove(path);
+    state = state.copyWith(selectedFiles: newFiles, outputs: newOutputs, errors: newErrors);
+  }
+
+  void updateOutput(String path, String newOutput) {
+    final newOutputs = Map<String, String>.from(state.outputs);
+    newOutputs[path] = newOutput;
+    state = state.copyWith(outputs: newOutputs);
+  }
+
   Future<void> runStt() async {
-    if (state.selectedMp3 == null) return;
-    state = state.copyWith(isProcessing: true, error: '');
-    try {
-      final req =
-          http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5000/stt'));
-      req.files
-          .add(await http.MultipartFile.fromPath('file', state.selectedMp3!));
-      final res = await req.send().timeout(const Duration(minutes: 30));
-      if (res.statusCode == 200) {
-        final body = await res.stream.bytesToString();
-        final json = jsonDecode(body);
-        state =
-            state.copyWith(outputText: json['srt'] ?? '', isProcessing: false);
-      } else {
-        state = state.copyWith(
-            error: "Error: ${res.statusCode}", isProcessing: false);
+    if (state.selectedFiles.isEmpty) return;
+    state = state.copyWith(isProcessing: true, errors: {}, outputs: {});
+    
+    for (String filePath in state.selectedFiles) {
+      state = state.copyWith(currentProcessingFile: filePath);
+      try {
+        final req =
+            http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5055/stt'));
+        req.files
+            .add(await http.MultipartFile.fromPath('file', filePath));
+        final res = await req.send().timeout(const Duration(minutes: 30));
+        
+        if (res.statusCode == 200) {
+          final body = await res.stream.bytesToString();
+          final json = jsonDecode(body);
+          final newOutputs = Map<String, String>.from(state.outputs);
+          newOutputs[filePath] = json['srt'] ?? '';
+          state = state.copyWith(outputs: newOutputs);
+        } else {
+          final newErrors = Map<String, String>.from(state.errors);
+          newErrors[filePath] = "Error: ${res.statusCode}";
+          state = state.copyWith(errors: newErrors);
+        }
+      } catch (e) {
+        final newErrors = Map<String, String>.from(state.errors);
+        newErrors[filePath] = "Exception: $e";
+        state = state.copyWith(errors: newErrors);
       }
-    } catch (e) {
-      state = state.copyWith(error: "Exception: $e", isProcessing: false);
     }
+    
+    state = state.copyWith(isProcessing: false, clearCurrentFile: true);
   }
 }

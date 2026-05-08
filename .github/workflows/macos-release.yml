@@ -2,9 +2,12 @@ name: macOS Release Pipeline
 
 on:
   push:
-    tags:
-      - 'v*' # Trigger on version tags, e.g., v1.0.0
-  workflow_dispatch: # Allow manual trigger from GitHub UI
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -48,7 +51,6 @@ jobs:
           echo "Found app at: $APP_PATH"
           
           # Create backend directory inside the .app bundle's Resources folder
-          # This matches BackendManager's path logic: p.join(execDir, '..', 'Resources', 'backend', 'vocalizeai_backend')
           mkdir -p "$APP_PATH/Contents/Resources/backend"
           
           # Copy the PyInstaller executable into the bundle
@@ -67,12 +69,21 @@ jobs:
           # Move it to workspace root for uploading
           mv "VocalizeAI-macOS.zip" $GITHUB_WORKSPACE/
 
+      - name: Delete Old Latest Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Deleting old latest release and tag if they exist..."
+          gh release delete latest --cleanup-tag -y || true
+          git push --delete origin latest || true
+
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
-        # Only create a release automatically if triggered by a tag push
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: latest
+          name: "VocalizeAI Latest (macOS)"
+          body: "Bản build tự động mới nhất từ nhánh `main`.\nĐược cập nhật vào: ${{ github.event.head_commit.timestamp }}"
           files: VocalizeAI-macOS.zip
-          generate_release_notes: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

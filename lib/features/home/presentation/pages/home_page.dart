@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/animated_background.dart';
 import '../../../stt/presentation/pages/stt_tab.dart';
 import '../../../translate/presentation/pages/translate_tab.dart';
@@ -146,6 +147,17 @@ class _HomePageState extends ConsumerState<HomePage> {
             ],
           ),
           const Spacer(),
+          Container(
+            decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12)),
+            child: IconButton(
+              icon: const Icon(Icons.downloading_rounded, color: Colors.white),
+              tooltip: 'Model Manager',
+              onPressed: () => GoRouter.of(context).push('/models'),
+            ),
+          ),
+          const SizedBox(width: 8),
           Container(
             decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.1),

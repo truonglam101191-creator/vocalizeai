@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 
 class BackendManager {
   static Process? _process;
-  static const String baseUrl = 'http://127.0.0.1:5000';
+  static const String baseUrl = 'http://127.0.0.1:5055';
 
   static Future<void> launch() async {
     try {

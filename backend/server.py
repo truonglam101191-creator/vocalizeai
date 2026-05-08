@@ -182,40 +182,54 @@ def _find_existing_whisper_model(model_name: str) -> Optional[str]:
     return None
 
 
-def get_whisper_model():
+def get_whisper_model(model_name: str = None):
     """Load or return cached Whisper model."""
     global _whisper_model
-    if _whisper_model is None:
-        from faster_whisper import WhisperModel
+    
+    if model_name is None:
+        model_name = WHISPER_MODEL_NAME
+        
+    # Nếu đã load model và tên model giống nhau thì trả về luôn
+    if _whisper_model is not None and getattr(_whisper_model, "model_name_cached", None) == model_name:
+        return _whisper_model
+        
+    # Nếu đang load model khác thì giải phóng model cũ
+    if _whisper_model is not None:
+        del _whisper_model
+        import gc; gc.collect()
+        _whisper_model = None
 
-        import multiprocessing
-        # Use up to 4 workers for parallel VAD segment transcription
-        cpu_count = multiprocessing.cpu_count()
-        workers = min(4, max(1, cpu_count // 2))
-        threads_per_worker = max(1, cpu_count // workers)
+    from faster_whisper import WhisperModel
 
-        existing = _find_existing_whisper_model(WHISPER_MODEL_NAME)
-        if existing:
-            _update_status("loading_whisper", 0.05, "Loading Whisper from local cache...")
-            _whisper_model = WhisperModel(
-                existing,
-                device="cpu",
-                compute_type="int8",
-                num_workers=workers,
-                cpu_threads=threads_per_worker,
-            )
-        else:
-            _update_status("downloading_whisper", 0.02, f"Downloading Whisper '{WHISPER_MODEL_NAME}' (~3GB from Systran/faster-whisper-large-v3)...")
-            _whisper_model = WhisperModel(
-                WHISPER_MODEL_NAME,
-                device="cpu",
-                compute_type="int8",
-                download_root=str(WHISPER_DIR),
-                num_workers=workers,
-                cpu_threads=threads_per_worker,
-            )
-        _model_status["whisper_ready"] = True
-        _update_status("loading_whisper", 0.45, "✅ Whisper model ready")
+    import multiprocessing
+    # Use up to 4 workers for parallel VAD segment transcription
+    cpu_count = multiprocessing.cpu_count()
+    workers = min(4, max(1, cpu_count // 2))
+    threads_per_worker = max(1, cpu_count // workers)
+
+    existing = _find_existing_whisper_model(model_name)
+    if existing:
+        _update_status("loading_whisper", 0.05, f"Loading Whisper {model_name} from local cache...")
+        _whisper_model = WhisperModel(
+            existing,
+            device="cpu",
+            compute_type="int8",
+            num_workers=workers,
+            cpu_threads=threads_per_worker,
+        )
+    else:
+        _update_status("downloading_whisper", 0.02, f"Downloading Whisper '{model_name}'...")
+        _whisper_model = WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+            download_root=str(WHISPER_DIR),
+            num_workers=workers,
+            cpu_threads=threads_per_worker,
+        )
+    _whisper_model.model_name_cached = model_name
+    _model_status["whisper_ready"] = True
+    _update_status("loading_whisper", 0.45, f"✅ Whisper {model_name} model ready")
     return _whisper_model
 
 
@@ -314,8 +328,15 @@ def _download_piper_binary():
     download_path = PIPER_DIR / filename
 
     log.info("⬇️  Downloading Piper CLI from %s ...", url)
-    _update_status("downloading_tts", 0.50, f"Downloading Piper CLI binary...")
-    urllib.request.urlretrieve(url, str(download_path))
+    
+    def reporthook_cli(block_num, block_size, total_size):
+        if total_size > 0:
+            percent = (block_num * block_size) / total_size
+            if percent > 1.0:
+                percent = 1.0
+            _update_status("downloading_tts", percent, f"Downloading Piper CLI binary... {int(percent*100)}%")
+
+    urllib.request.urlretrieve(url, str(download_path), reporthook=reporthook_cli)
 
     # Extract
     log.info("📦 Extracting Piper binary...")
@@ -429,7 +450,16 @@ def ensure_piper_model(voice_id: str = None) -> Path:
         return ensure_piper_model(TTS_MODEL_NAME)
 
     log.info("⬇️  Downloading model: %s", voice_id)
-    urllib.request.urlretrieve(url_onnx, str(model_path))
+    
+    def reporthook(block_num, block_size, total_size):
+        if total_size > 0:
+            percent = (block_num * block_size) / total_size
+            if percent > 1.0:
+                percent = 1.0
+            # Scale from 0.0 to 1.0
+            _update_status("downloading_tts", percent, f"Downloading Piper model {voice_id}... {int(percent*100)}%")
+
+    urllib.request.urlretrieve(url_onnx, str(model_path), reporthook=reporthook)
     urllib.request.urlretrieve(url_json, str(config_path))
     log.info("✅ Model downloaded: %s", model_path)
 
@@ -603,10 +633,10 @@ def chunk_text(text: str, max_chars: int = 200):
 # Pipeline Steps
 # ────────────────────────────────────────────────────────────
 
-def step_stt(mp3_path: Path, srt_path: Path) -> str:
+def step_stt(mp3_path: Path, srt_path: Path, model_name: str = None) -> str:
     """Step 1: MP3 → SRT via faster-whisper"""
-    log.info("🎙️  Step 1: Speech-to-Text (Whisper)...")
-    model = get_whisper_model()
+    log.info(f"🎙️  Step 1: Speech-to-Text (Whisper {model_name or WHISPER_MODEL_NAME})...")
+    model = get_whisper_model(model_name)
     segments, info = model.transcribe(
         str(mp3_path),
         language=None,          # auto-detect (works for Vietnamese too)
@@ -615,12 +645,22 @@ def step_stt(mp3_path: Path, srt_path: Path) -> str:
         vad_parameters={"min_silence_duration_ms": 500},
     )
     log.info(
-        "   Detected language: %s (prob=%.2f)",
+        "   Detected language: %s (prob=%.2f), duration: %.2fs",
         info.language,
         info.language_probability,
+        info.duration
     )
-    # Materialise generator
-    segments_list = list(segments)
+    
+    segments_list = []
+    _update_status("processing_stt", 0.0, f"Starting STT ({model_name})...")
+    
+    for segment in segments:
+        segments_list.append(segment)
+        if info.duration > 0:
+            progress = min(1.0, segment.end / info.duration)
+            _update_status("processing_stt", progress, f"Extracting audio to text... {int(progress * 100)}%")
+
+    _update_status("idle", 1.0, "STT Extraction Complete")
     srt_content = write_srt(segments_list, srt_path)
     return srt_content
 
@@ -864,6 +904,101 @@ def get_voices():
             }
         }
 
+# ────────────────────────────────────────────────────────────
+# API Models Management (Model Manager)
+# ────────────────────────────────────────────────────────────
+
+@app.get("/api/models")
+def get_models_list():
+    """List available and downloaded models."""
+    whisper_models = ["tiny", "base", "small", "medium", "large-v3"]
+    whisper_list = []
+    for m in whisper_models:
+        existing = _find_existing_whisper_model(m)
+        whisper_list.append({
+            "name": m,
+            "type": "whisper",
+            "downloaded": existing is not None,
+            "path": existing
+        })
+        
+    try:
+        data = get_piper_voices_data()
+        piper_list = []
+        for vid, info in data.items():
+            model_path = TTS_DIR / f"{vid}.onnx"
+            piper_list.append({
+                "name": vid,
+                "type": "tts",
+                "language": info.get("language", {}).get("name_english", "Unknown"),
+                "quality": info.get("quality", "medium"),
+                "downloaded": model_path.exists(),
+            })
+    except Exception:
+        piper_list = []
+        for vid in SUPPORTED_PIPER_VOICES.keys():
+            model_path = TTS_DIR / f"{vid}.onnx"
+            piper_list.append({
+                "name": vid,
+                "type": "tts",
+                "language": "Vietnamese" if "vi_" in vid else "English",
+                "quality": "medium",
+                "downloaded": model_path.exists(),
+            })
+
+    return {"whisper": whisper_list, "tts": piper_list}
+
+def _download_whisper_bg(model_name: str):
+    try:
+        _update_status(f"downloading", 0.1, f"Downloading Whisper {model_name}...")
+        from faster_whisper import WhisperModel
+        m = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(WHISPER_DIR))
+        del m
+        import gc; gc.collect()
+        _update_status("idle", 1.0, f"✅ Downloaded Whisper {model_name}")
+    except Exception as e:
+        log.error(f"Failed to download whisper model {model_name}: {e}")
+        _update_status("error", 0.0, f"Error downloading {model_name}: {e}")
+
+@app.post("/api/models/download")
+def download_model(model_name: str = Form(...), model_type: str = Form(...), background_tasks: BackgroundTasks = None):
+    """Trigger background download of a model."""
+    if model_type == "whisper":
+        if background_tasks:
+            background_tasks.add_task(_download_whisper_bg, model_name)
+        return {"status": "downloading", "model": model_name, "type": "whisper"}
+    elif model_type == "tts":
+        if background_tasks:
+            background_tasks.add_task(ensure_piper_model, model_name)
+        return {"status": "downloading", "model": model_name, "type": "tts"}
+    else:
+        raise HTTPException(400, "Invalid model_type")
+
+@app.delete("/api/models/{model_type}/{model_name}")
+def delete_model(model_type: str, model_name: str):
+    """Delete a downloaded model."""
+    import shutil
+    if model_type == "whisper":
+        existing = _find_existing_whisper_model(model_name)
+        if existing and str(WHISPER_DIR) in existing: # Only delete if in our cache
+            shutil.rmtree(existing, ignore_errors=True)
+            return {"status": "deleted", "model": model_name}
+        return {"status": "not_found_or_not_deletable", "model": model_name}
+    elif model_type == "tts":
+        model_path = TTS_DIR / f"{model_name}.onnx"
+        json_path = TTS_DIR / f"{model_name}.onnx.json"
+        deleted = False
+        if model_path.exists():
+            model_path.unlink()
+            deleted = True
+        if json_path.exists():
+            json_path.unlink()
+        if deleted:
+            return {"status": "deleted", "model": model_name}
+        return {"status": "not_found", "model": model_name}
+    raise HTTPException(400, "Invalid model_type")
+
+
 @app.post("/clear-cache")
 async def clear_cache(clear_models: bool = False, clear_temp: bool = True):
     """Clear cache to free storage.
@@ -900,7 +1035,7 @@ def shutdown_server():
 
 
 @app.post("/stt")
-async def run_stt(file: UploadFile = File(...)):
+async def run_stt(file: UploadFile = File(...), whisper_model: str = Form(None)):
     """Convert audio file to text using Whisper."""
     if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg")):
         raise HTTPException(400, "Only audio files are supported (mp3, wav, m4a, flac, ogg)")
@@ -915,7 +1050,7 @@ async def run_stt(file: UploadFile = File(...)):
     content = await file.read()
     mp3_path.write_bytes(content)
     
-    srt_content = step_stt(mp3_path, srt_path)
+    srt_content = step_stt(mp3_path, srt_path, whisper_model)
     
     # Extract plain text from SRT for easier use in Translate tab
     entries = parse_srt(srt_content)
@@ -1064,6 +1199,7 @@ async def run_tts(
 async def run_pipeline(
     file: UploadFile = File(...),
     tts_voice: str = Form(None),
+    whisper_model: str = Form(None),
     speaker_wav: Optional[UploadFile] = File(default=None),
     background_tasks: BackgroundTasks = None,
 ):
@@ -1099,7 +1235,7 @@ async def run_pipeline(
             log.info("🎤 Speaker sample saved for voice cloning")
 
         # ── Step 1: STT ──
-        srt_content = step_stt(mp3_path, srt_path)
+        srt_content = step_stt(mp3_path, srt_path, whisper_model)
 
         # ── Step 2: TTS ──
         clips_dir = job_dir / "clips"
@@ -1153,14 +1289,14 @@ def _cleanup_job(job_dir: Path, keep_file: Path):
 if __name__ == "__main__":
     log.info("=" * 60)
     log.info("  VocalizeAI Backend  v1.0")
-    log.info("  Port: 5000")
+    log.info("  Port: 5055")
     log.info("  Cache: %s", CACHE_DIR)
     log.info("  Tip: Delete %s to free all storage", CACHE_DIR)
     log.info("=" * 60)
     uvicorn.run(
         "server:app",
         host="127.0.0.1",
-        port=5000,
+        port=5055,
         log_level="info",
         reload=False,
     )

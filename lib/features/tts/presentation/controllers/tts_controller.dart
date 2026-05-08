@@ -36,7 +36,7 @@ class TtsController extends StateNotifier<TtsState> {
 
   Future<void> fetchVoices() async {
     try {
-      final res = await http.get(Uri.parse('http://127.0.0.1:5000/voices'));
+      final res = await http.get(Uri.parse('http://127.0.0.1:5055/voices'));
       if (res.statusCode == 200) {
         final vd = jsonDecode(res.body);
         List<Map<String, String>> vlist = [];
@@ -67,7 +67,7 @@ class TtsController extends StateNotifier<TtsState> {
     player.stop();
     try {
       final req =
-          http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5000/tts'));
+          http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5055/tts'));
       req.fields['text'] = text;
       if (state.selectedVoice != null) {
         req.fields['tts_voice'] = state.selectedVoice!;
