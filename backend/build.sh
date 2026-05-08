@@ -27,6 +27,17 @@ source venv/bin/activate
 echo "→ Installing requirements..."
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
+
+echo "→ Installing OpenVoice (patched)..."
+if [ ! -d "OpenVoice" ]; then
+  git clone https://github.com/myshell-ai/OpenVoice.git -q
+fi
+cd OpenVoice
+# Remove faster-whisper from OpenVoice's setup.py so it uses our newer version
+sed -i.bak '/faster-whisper/d' setup.py
+pip install -e . -q
+cd ..
+
 pip install pyinstaller -q
 
 # ── 3. Collect package paths (needed for PyInstaller data) ──
