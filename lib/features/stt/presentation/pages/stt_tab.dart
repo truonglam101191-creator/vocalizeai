@@ -27,7 +27,19 @@ class SttTab extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildDropZone(state, controller, l10n),
-          const SizedBox(height: 24),
+          if (!state.isProcessing)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: controller.pickFolder,
+                icon: const Icon(Icons.folder_open_rounded, color: Color(0xFF06B6D4)),
+                label: Text(
+                  l10n.get('selectFolderBatch'),
+                  style: GoogleFonts.inter(color: const Color(0xFF06B6D4), fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
           if (state.selectedFiles.isNotEmpty) ...[
             _buildFileList(state, controller, context, l10n, ref),
             const SizedBox(height: 24),
@@ -80,7 +92,8 @@ class SttTab extends ConsumerWidget {
                 if (state.selectedFiles.isEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'MP3, WAV, M4A, FLAC',
+                    'Audio: MP3, WAV, M4A, FLAC\nVideo: MP4, MKV, MOV',
+                    textAlign: TextAlign.center,
                     style:
                         GoogleFonts.inter(color: Colors.white30, fontSize: 12),
                   )
@@ -230,6 +243,29 @@ class SttTab extends ConsumerWidget {
                   Row(
                     children: [
                       const Spacer(),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.download_rounded, color: Color(0xFF10B981), size: 20),
+                        tooltip: 'Export',
+                        color: const Color(0xFF1E1E2E),
+                        onSelected: (value) {
+                          if (value == 'txt') {
+                            controller.exportAsTxt(path);
+                          } else if (value == 'srt') {
+                            controller.exportAsSrt(path);
+                          }
+                        },
+                        itemBuilder: (BuildContext context) => [
+                          PopupMenuItem<String>(
+                            value: 'txt',
+                            child: Text(l10n.get('exportTxtMinutes'), style: GoogleFonts.inter(color: Colors.white, fontSize: 14)),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'srt',
+                            child: Text(l10n.get('exportSrtSubtitles'), style: GoogleFonts.inter(color: Colors.white, fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.copy_rounded,
                             color: Color(0xFF06B6D4), size: 20),

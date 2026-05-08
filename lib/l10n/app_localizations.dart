@@ -284,6 +284,72 @@ abstract class AppLocalizations {
   /// **'Copied to clipboard!'**
   String get copiedToClipboard;
 
+  /// No description provided for @modelManager.
+  ///
+  /// In en, this message translates to:
+  /// **'Model Manager'**
+  String get modelManager;
+
+  /// No description provided for @whisperStt.
+  ///
+  /// In en, this message translates to:
+  /// **'Whisper (STT)'**
+  String get whisperStt;
+
+  /// No description provided for @piperTts.
+  ///
+  /// In en, this message translates to:
+  /// **'Piper (TTS)'**
+  String get piperTts;
+
+  /// No description provided for @noModelsAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'No models available'**
+  String get noModelsAvailable;
+
+  /// No description provided for @multilingual.
+  ///
+  /// In en, this message translates to:
+  /// **'Multilingual'**
+  String get multilingual;
+
+  /// No description provided for @deleteModelTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Model'**
+  String get deleteModelTooltip;
+
+  /// No description provided for @deleteModelConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Model'**
+  String get deleteModelConfirmTitle;
+
+  /// No description provided for @deleteModelConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Are you sure you want to delete {modelName}?'**
+  String deleteModelConfirmBody(String modelName);
+
+  /// No description provided for @cancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get cancel;
+
+  /// No description provided for @delete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get delete;
+
+  /// No description provided for @download.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get download;
+
   /// No description provided for @switchLanguage.
   ///
   /// In en, this message translates to:

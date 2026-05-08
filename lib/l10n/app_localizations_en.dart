@@ -102,5 +102,40 @@ class AppLocalizationsEn extends AppLocalizations {
   String get copiedToClipboard => 'Copied to clipboard!';
 
   @override
+  String get modelManager => 'Model Manager';
+
+  @override
+  String get whisperStt => 'Whisper (STT)';
+
+  @override
+  String get piperTts => 'Piper (TTS)';
+
+  @override
+  String get noModelsAvailable => 'No models available';
+
+  @override
+  String get multilingual => 'Multilingual';
+
+  @override
+  String get deleteModelTooltip => 'Delete Model';
+
+  @override
+  String get deleteModelConfirmTitle => 'Delete Model';
+
+  @override
+  String deleteModelConfirmBody(String modelName) {
+    return 'Are you sure you want to delete $modelName?';
+  }
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
+  String get download => 'Download';
+
+  @override
   String get switchLanguage => 'Switch Language';
 }

@@ -4,6 +4,7 @@ class TtsState {
   final List<Map<String, String>> voices;
   final String? outputWavPath;
   final List<String> outputFiles;
+  final String? selectedMediaFile;
 
   const TtsState({
     this.isProcessing = false,
@@ -11,6 +12,7 @@ class TtsState {
     this.voices = const [],
     this.outputWavPath,
     this.outputFiles = const [],
+    this.selectedMediaFile,
   });
 
   TtsState copyWith({
@@ -19,6 +21,8 @@ class TtsState {
     List<Map<String, String>>? voices,
     String? outputWavPath,
     List<String>? outputFiles,
+    String? selectedMediaFile,
+    bool clearMediaFile = false,
   }) {
     return TtsState(
       isProcessing: isProcessing ?? this.isProcessing,
@@ -26,6 +30,7 @@ class TtsState {
       voices: voices ?? this.voices,
       outputWavPath: outputWavPath ?? this.outputWavPath,
       outputFiles: outputFiles ?? this.outputFiles,
+      selectedMediaFile: clearMediaFile ? null : (selectedMediaFile ?? this.selectedMediaFile),
     );
   }
 }

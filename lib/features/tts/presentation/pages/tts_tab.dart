@@ -170,6 +170,48 @@ class _TtsTabState extends ConsumerState<TtsTab> {
                     ),
                   ),
                 ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: state.isProcessing ? null : () => controller.pickMediaFile(),
+                borderRadius: BorderRadius.circular(16),
+                child: BaseCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        state.selectedMediaFile != null ? Icons.video_file_rounded : Icons.add_photo_alternate_rounded,
+                        color: state.selectedMediaFile != null ? const Color(0xFF10B981) : Colors.white54,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              state.selectedMediaFile != null ? p.basename(state.selectedMediaFile!) : l10n.get('originalMediaOptional'),
+                              style: GoogleFonts.inter(
+                                color: state.selectedMediaFile != null ? Colors.white : Colors.white54,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              l10n.get('selectOriginalToDub'),
+                              style: GoogleFonts.inter(color: Colors.white30, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (state.selectedMediaFile != null && !state.isProcessing)
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 20),
+                          onPressed: () => controller.clearMediaFile(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
               BaseButton(
                 text: l10n.get('generateAudioTts'),

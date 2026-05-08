@@ -38,7 +38,23 @@ class AppLocalizations {
       'generatedAudios': 'Generated Audios',
       'copyContent': 'Copy content',
       'copiedToClipboard': 'Copied to clipboard!',
-      'switchLanguage': 'Switch Language (EN/VI)'
+      'switchLanguage': 'Switch Language (EN/VI)',
+      'exportTxtMinutes': 'Export as TXT (Minutes)',
+      'exportSrtSubtitles': 'Export as SRT (Subtitles)',
+      'selectFolderBatch': 'Select Folder (Batch)',
+      'originalMediaOptional': 'Original Media (Optional)',
+      'selectOriginalToDub': 'Select original audio/video to Auto-Dub',
+      'modelManager': 'Model Manager',
+      'whisperStt': 'Whisper (STT)',
+      'piperTts': 'Piper (TTS)',
+      'noModelsAvailable': 'No models available',
+      'multilingual': 'Multilingual',
+      'deleteModelTooltip': 'Delete Model',
+      'deleteModelConfirmTitle': 'Delete Model',
+      'deleteModelConfirmBody': 'Are you sure you want to delete {modelName}?',
+      'cancel': 'Cancel',
+      'delete': 'Delete',
+      'download': 'Download'
     },
     'vi': {
       'offlineMediaPipeline': 'Xử lý Truyền thông Ngoại tuyến',
@@ -72,11 +88,29 @@ class AppLocalizations {
       'generatedAudios': 'Âm thanh đã tạo',
       'copyContent': "Sao chép nội dung",
       'copiedToClipboard': 'Đã sao chép vào khay nhớ tạm!',
-      'switchLanguage': 'Đổi ngôn ngữ (EN/VI)'
+      'switchLanguage': 'Đổi ngôn ngữ (EN/VI)',
+      'exportTxtMinutes': 'Xuất file TXT (Biên bản)',
+      'exportSrtSubtitles': 'Xuất file SRT (Phụ đề)',
+      'selectFolderBatch': 'Chọn thư mục (Hàng loạt)',
+      'originalMediaOptional': 'Media Gốc (Tuỳ chọn)',
+      'selectOriginalToDub': 'Chọn Audio/Video gốc để Lồng tiếng tự động',
+      'modelManager': 'Quản lý Model',
+      'whisperStt': 'Whisper (STT)',
+      'piperTts': 'Piper (TTS)',
+      'noModelsAvailable': 'Không có model nào',
+      'multilingual': 'Đa ngôn ngữ',
+      'deleteModelTooltip': 'Xóa Model',
+      'deleteModelConfirmTitle': 'Xóa Model',
+      'deleteModelConfirmBody': 'Bạn có chắc chắn muốn xóa {modelName} không?',
+      'cancel': 'Hủy',
+      'delete': 'Xóa',
+      'download': 'Tải xuống'
     }
   };
 
   String get(String key) {
-    return _localizedValues[locale.languageCode]?[key] ?? _localizedValues['en']![key] ?? key;
+    return _localizedValues[locale.languageCode]?[key] ??
+        _localizedValues['en']![key] ??
+        key;
   }
 }

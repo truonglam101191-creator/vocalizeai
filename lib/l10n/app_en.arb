@@ -30,5 +30,23 @@
   "generatedAudios": "Generated Audios",
   "copyContent": "Copy content",
   "copiedToClipboard": "Copied to clipboard!",
+  "modelManager": "Model Manager",
+  "whisperStt": "Whisper (STT)",
+  "piperTts": "Piper (TTS)",
+  "noModelsAvailable": "No models available",
+  "multilingual": "Multilingual",
+  "deleteModelTooltip": "Delete Model",
+  "deleteModelConfirmTitle": "Delete Model",
+  "deleteModelConfirmBody": "Are you sure you want to delete {modelName}?",
+  "@deleteModelConfirmBody": {
+    "placeholders": {
+      "modelName": {
+        "type": "String"
+      }
+    }
+  },
+  "cancel": "Cancel",
+  "delete": "Delete",
+  "download": "Download",
   "switchLanguage": "Switch Language"
 }

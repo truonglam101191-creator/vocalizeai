@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:vocalizeai/features/tts/presentation/states/tts_state.dart';
@@ -20,6 +21,21 @@ class TtsController extends StateNotifier<TtsState> {
   }
 
   void setSelectedVoice(String v) => state = state.copyWith(selectedVoice: v);
+
+  Future<void> pickMediaFile() async {
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'mp4', 'mkv', 'mov'],
+      allowMultiple: false,
+    );
+    if (res != null && res.files.isNotEmpty) {
+      state = state.copyWith(selectedMediaFile: res.files.first.path);
+    }
+  }
+
+  void clearMediaFile() {
+    state = state.copyWith(clearMediaFile: true);
+  }
 
   Future<void> loadFiles() async {
     try {
@@ -72,7 +88,14 @@ class TtsController extends StateNotifier<TtsState> {
       if (state.selectedVoice != null) {
         req.fields['tts_voice'] = state.selectedVoice!;
       }
-      final res = await req.send().timeout(const Duration(minutes: 10));
+      if (state.selectedMediaFile != null) {
+        if (File(state.selectedMediaFile!).existsSync()) {
+          req.files.add(await http.MultipartFile.fromPath('media_file', state.selectedMediaFile!));
+        } else {
+          state = state.copyWith(clearMediaFile: true);
+        }
+      }
+      final res = await req.send().timeout(const Duration(minutes: 30));
       if (res.statusCode == 200) {
         final bytes = await res.stream.toBytes();
         final docDir = await getApplicationDocumentsDirectory();
@@ -80,8 +103,18 @@ class TtsController extends StateNotifier<TtsState> {
         if (!await targetDir.exists()) {
           await targetDir.create(recursive: true);
         }
+        
+        bool isVideo = false;
+        if (state.selectedMediaFile != null) {
+           final lowerPath = state.selectedMediaFile!.toLowerCase();
+           if (lowerPath.endsWith('.mp4') || lowerPath.endsWith('.mkv') || lowerPath.endsWith('.mov')) {
+             isVideo = true;
+           }
+        }
+        
+        final ext = isVideo ? '.mp4' : '.wav';
         final outPath = p.join(
-            targetDir.path, 'tts_${DateTime.now().millisecondsSinceEpoch}.wav');
+            targetDir.path, 'tts_${DateTime.now().millisecondsSinceEpoch}$ext');
         await File(outPath).writeAsBytes(bytes);
 
         final newFiles = List<String>.from(state.outputFiles);

@@ -30,5 +30,23 @@
   "generatedAudios": "Âm thanh đã tạo",
   "copyContent": "Sao chép nội dung",
   "copiedToClipboard": "Đã sao chép vào khay nhớ tạm!",
+  "modelManager": "Quản lý Model",
+  "whisperStt": "Whisper (STT)",
+  "piperTts": "Piper (TTS)",
+  "noModelsAvailable": "Không có model nào",
+  "multilingual": "Đa ngôn ngữ",
+  "deleteModelTooltip": "Xóa Model",
+  "deleteModelConfirmTitle": "Xóa Model",
+  "deleteModelConfirmBody": "Bạn có chắc chắn muốn xóa {modelName} không?",
+  "@deleteModelConfirmBody": {
+    "placeholders": {
+      "modelName": {
+        "type": "String"
+      }
+    }
+  },
+  "cancel": "Hủy",
+  "delete": "Xóa",
+  "download": "Tải xuống",
   "switchLanguage": "Đổi Ngôn ngữ"
 }

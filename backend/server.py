@@ -634,11 +634,23 @@ def chunk_text(text: str, max_chars: int = 200):
 # ────────────────────────────────────────────────────────────
 
 def step_stt(mp3_path: Path, srt_path: Path, model_name: str = None) -> str:
-    """Step 1: MP3 → SRT via faster-whisper"""
+    """Step 1: Audio/Video → SRT via faster-whisper"""
+    actual_audio_path = mp3_path
+    if mp3_path.suffix.lower() in [".mp4", ".mkv", ".mov"]:
+        actual_audio_path = mp3_path.with_suffix(".wav")
+        _update_status("processing_stt", 0.0, "Extracting audio from video...")
+        log.info(f"Extracting audio: {mp3_path} -> {actual_audio_path}")
+        import subprocess
+        subprocess.run([
+            "ffmpeg", "-y", "-i", str(mp3_path),
+            "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+            str(actual_audio_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     log.info(f"🎙️  Step 1: Speech-to-Text (Whisper {model_name or WHISPER_MODEL_NAME})...")
     model = get_whisper_model(model_name)
     segments, info = model.transcribe(
-        str(mp3_path),
+        str(actual_audio_path),
         language=None,          # auto-detect (works for Vietnamese too)
         beam_size=5,
         vad_filter=True,
@@ -1037,8 +1049,8 @@ def shutdown_server():
 @app.post("/stt")
 async def run_stt(file: UploadFile = File(...), whisper_model: str = Form(None)):
     """Convert audio file to text using Whisper."""
-    if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg")):
-        raise HTTPException(400, "Only audio files are supported (mp3, wav, m4a, flac, ogg)")
+    if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".mov")):
+        raise HTTPException(400, "Only audio and video files are supported (mp3, wav, m4a, flac, ogg, mp4, mkv, mov)")
         
     job_id = f"job_{int(time.time() * 1000)}"
     job_dir = TEMP_DIR / job_id
@@ -1158,7 +1170,8 @@ async def run_translate(
 @app.post("/tts")
 async def run_tts(
     text: str = Form(...),
-    tts_voice: str = Form(None)
+    tts_voice: str = Form(None),
+    media_file: Optional[UploadFile] = File(default=None)
 ):
     """Convert plain text to WAV using Piper."""
     if not text.strip():
@@ -1194,6 +1207,44 @@ async def run_tts(
             if fallback is None:
                 raise HTTPException(500, "TTS produced empty output and no fallback available")
         
+    if media_file:
+        media_content = await media_file.read()
+        media_path = job_dir / f"original{Path(media_file.filename).suffix}"
+        media_path.write_bytes(media_content)
+        
+        is_video = media_path.suffix.lower() in [".mp4", ".mkv", ".mov"]
+        final_out = job_dir / f"dubbed_output{'.mp4' if is_video else '.wav'}"
+        
+        import subprocess
+        log.info(f"🎧 Mixing TTS with original media: {media_path.name}")
+        _update_status("processing_mix", 0.0, "Mixing and generating final dub...")
+        
+        if is_video:
+            cmd = [
+                "ffmpeg", "-y", 
+                "-i", str(media_path),
+                "-i", str(out_wav),
+                "-filter_complex", "[0:a]volume=0.15[a0];[1:a]volume=1.0[a1];[a0][a1]amix=inputs=2:duration=first[aout]",
+                "-map", "0:v", "-map", "[aout]",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                str(final_out)
+            ]
+        else:
+            cmd = [
+                "ffmpeg", "-y", 
+                "-i", str(media_path),
+                "-i", str(out_wav),
+                "-filter_complex", "[0:a]volume=0.15[a0];[1:a]volume=1.0[a1];[a0][a1]amix=inputs=2:duration=first[aout]",
+                "-map", "[aout]",
+                str(final_out)
+            ]
+            
+        await asyncio.to_thread(subprocess.run, cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _update_status("idle", 1.0, "Dubbing complete")
+        
+        return FileResponse(final_out, media_type="video/mp4" if is_video else "audio/wav", filename=final_out.name)
+
     return FileResponse(out_wav, media_type="audio/wav", filename="tts_output.wav")
 
 
@@ -1210,8 +1261,8 @@ async def run_pipeline(
     - file: input MP3
     - speaker_wav: (optional) WAV sample for voice cloning
     """
-    if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg")):
-        raise HTTPException(400, "Only audio files are supported (mp3, wav, m4a, flac, ogg)")
+    if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".mov")):
+        raise HTTPException(400, "Only audio and video files are supported (mp3, wav, m4a, flac, ogg, mp4, mkv, mov)")
 
     # Create a unique temp workspace for this request
     job_id = f"job_{int(time.time() * 1000)}"

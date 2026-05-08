@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/animated_background.dart';
 import '../controllers/model_manager_controller.dart';
 import '../../domain/models/ai_model.dart';
+import '../../../../core/l10n/locale_controller.dart';
 
 class ModelManagerScreen extends ConsumerWidget {
   const ModelManagerScreen({super.key});
@@ -13,6 +14,7 @@ class ModelManagerScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final modelsState = ref.watch(modelManagerProvider);
     final statusState = ref.watch(backendStatusProvider);
+    final l10n = ref.watch(l10nProvider);
 
     String statusText = '';
     double progress = 0.0;
@@ -28,7 +30,7 @@ class ModelManagerScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text('Model Manager',
+        title: Text(l10n.get('modelManager'),
             style: GoogleFonts.outfit(
                 color: Colors.white, fontWeight: FontWeight.bold)),
         leading: IconButton(
@@ -81,7 +83,7 @@ class ModelManagerScreen extends ConsumerWidget {
                 ),
               Expanded(
                 child: modelsState.when(
-                  data: (data) => _buildLists(context, ref, data),
+                  data: (data) => _buildLists(context, ref, data, l10n),
                   loading: () => const Center(
                       child:
                           CircularProgressIndicator(color: Color(0xFF06B6D4))),
@@ -97,34 +99,37 @@ class ModelManagerScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildLists(
-      BuildContext context, WidgetRef ref, Map<String, List<AiModel>> data) {
+  Widget _buildLists(BuildContext context, WidgetRef ref,
+      Map<String, List<AiModel>> data, dynamic l10n) {
     return DefaultTabController(
       length: 2,
       child: Column(
         children: [
-          TabBar(
-            indicatorColor: const Color(0xFF06B6D4),
-            labelColor: Colors.white,
-            indicatorSize: TabBarIndicatorSize.tab,
-            unselectedLabelColor: Colors.white54,
-            labelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
-            indicator: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TabBar(
+              indicatorColor: const Color(0xFF06B6D4),
+              labelColor: Colors.white,
+              indicatorSize: TabBarIndicatorSize.tab,
+              unselectedLabelColor: Colors.white54,
+              labelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              indicator: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.2)),
+              ),
+              tabs: [
+                Tab(text: l10n.get('whisperStt')),
+                Tab(text: l10n.get('piperTts')),
+              ],
+              dividerHeight: 0,
             ),
-            tabs: const [
-              Tab(text: 'Whisper (STT)'),
-              Tab(text: 'Piper (TTS)'),
-            ],
-            dividerHeight: 0,
           ),
           Expanded(
             child: TabBarView(
               children: [
-                _buildModelList(ref, data['whisper'] ?? []),
-                _buildModelList(ref, data['tts'] ?? []),
+                _buildModelList(ref, data['whisper'] ?? [], l10n),
+                _buildModelList(ref, data['tts'] ?? [], l10n),
               ],
             ),
           ),
@@ -133,10 +138,10 @@ class ModelManagerScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildModelList(WidgetRef ref, List<AiModel> models) {
+  Widget _buildModelList(WidgetRef ref, List<AiModel> models, dynamic l10n) {
     if (models.isEmpty) {
       return Center(
-          child: Text('No models available',
+          child: Text(l10n.get('noModelsAvailable'),
               style: GoogleFonts.inter(color: Colors.white54)));
     }
 
@@ -164,14 +169,15 @@ class ModelManagerScreen extends ConsumerWidget {
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize: 16)),
-            subtitle: Text(model.language ?? 'Multilingual',
+            subtitle: Text(model.language ?? l10n.get('multilingual'),
                 style: GoogleFonts.inter(color: Colors.white54, fontSize: 13)),
             trailing: model.downloaded
                 ? IconButton(
                     icon: const Icon(Icons.delete_outline,
                         color: Colors.redAccent),
-                    tooltip: 'Delete Model',
-                    onPressed: () => _showDeleteConfirm(context, ref, model),
+                    tooltip: l10n.get('deleteModelTooltip'),
+                    onPressed: () =>
+                        _showDeleteConfirm(context, ref, model, l10n),
                   )
                 : isDownloading
                     ? const SizedBox(
@@ -187,7 +193,7 @@ class ModelManagerScreen extends ConsumerWidget {
                               borderRadius: BorderRadius.circular(8)),
                         ),
                         icon: const Icon(Icons.download_rounded, size: 18),
-                        label: const Text('Download'),
+                        label: Text(l10n.get('download')),
                         onPressed: () => ref
                             .read(modelManagerProvider.notifier)
                             .downloadModel(model.name, model.type),
@@ -198,20 +204,24 @@ class ModelManagerScreen extends ConsumerWidget {
     );
   }
 
-  void _showDeleteConfirm(BuildContext context, WidgetRef ref, AiModel model) {
+  void _showDeleteConfirm(
+      BuildContext context, WidgetRef ref, AiModel model, dynamic l10n) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E2E),
-        title: Text('Delete Model',
+        title: Text(l10n.get('deleteModelConfirmTitle'),
             style: GoogleFonts.outfit(color: Colors.white)),
-        content: Text('Are you sure you want to delete ${model.name}?',
+        content: Text(
+            l10n
+                .get('deleteModelConfirmBody')
+                .replaceAll('{modelName}', model.name),
             style: GoogleFonts.inter(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child:
-                const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: Text(l10n.get('cancel'),
+                style: const TextStyle(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () {
@@ -220,8 +230,8 @@ class ModelManagerScreen extends ConsumerWidget {
                   .read(modelManagerProvider.notifier)
                   .deleteModel(model.name, model.type);
             },
-            child:
-                const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+            child: Text(l10n.get('delete'),
+                style: const TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),

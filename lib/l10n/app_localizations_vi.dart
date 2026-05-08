@@ -104,5 +104,40 @@ class AppLocalizationsVi extends AppLocalizations {
   String get copiedToClipboard => 'Đã sao chép vào khay nhớ tạm!';
 
   @override
+  String get modelManager => 'Quản lý Model';
+
+  @override
+  String get whisperStt => 'Whisper (STT)';
+
+  @override
+  String get piperTts => 'Piper (TTS)';
+
+  @override
+  String get noModelsAvailable => 'Không có model nào';
+
+  @override
+  String get multilingual => 'Đa ngôn ngữ';
+
+  @override
+  String get deleteModelTooltip => 'Xóa Model';
+
+  @override
+  String get deleteModelConfirmTitle => 'Xóa Model';
+
+  @override
+  String deleteModelConfirmBody(String modelName) {
+    return 'Bạn có chắc chắn muốn xóa $modelName không?';
+  }
+
+  @override
+  String get cancel => 'Hủy';
+
+  @override
+  String get delete => 'Xóa';
+
+  @override
+  String get download => 'Tải xuống';
+
+  @override
   String get switchLanguage => 'Đổi Ngôn ngữ';
 }
