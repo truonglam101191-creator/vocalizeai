@@ -9,7 +9,7 @@ uvicorn[standard]>=0.25.0
 python-multipart>=0.0.6
 
 # ── Speech-to-Text ──
-faster-whisper>=1.0.0
+faster-whisper
 
 # ── Text-to-Speech ──
 # Piper TTS CLI binary — auto-downloaded, no pip package needed
