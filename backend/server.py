@@ -53,9 +53,10 @@ MODELS_DIR = CACHE_DIR / "models"
 WHISPER_DIR = MODELS_DIR / "whisper"
 TTS_DIR = MODELS_DIR / "tts"
 PIPER_DIR = CACHE_DIR / "piper"  # Piper CLI binary location
+OPENVOICE_DIR = CACHE_DIR / "openvoice"
 TEMP_DIR = CACHE_DIR / "temp"
 
-for d in [MODELS_DIR, WHISPER_DIR, TTS_DIR, PIPER_DIR, TEMP_DIR]:
+for d in [MODELS_DIR, WHISPER_DIR, TTS_DIR, PIPER_DIR, OPENVOICE_DIR, TEMP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 
@@ -91,15 +92,17 @@ WHISPER_MODEL_PATH = os.environ.get("WHISPER_MODEL_PATH", None)
 # ────────────────────────────────────────────────────────────
 _whisper_model = None
 _piper_binary = None  # Path to piper CLI binary
+_tone_color_converter = None
 
 # Real-time status visible via /status endpoint
 _model_status = {
     "phase": "idle",        # idle | downloading_whisper | loading_whisper |
-                            # downloading_tts | loading_tts | ready | error
+                            # downloading_tts | loading_tts | ready | error | processing_voice_clone
     "progress": 0.0,       # 0.0 → 1.0 (tổng thể cả 2 model)
     "detail": "Waiting to start",
     "whisper_ready": False,
     "tts_ready": False,
+    "voice_clone_ready": False,
 }
 
 
@@ -108,7 +111,12 @@ def _update_status(phase: str, progress: float, detail: str):
     _model_status["phase"] = phase
     _model_status["progress"] = round(min(max(progress, 0.0), 1.0), 3)
     _model_status["detail"] = detail
-    log.info("📊 [%s] %.0f%% — %s", phase, progress * 100, detail)
+    
+    # Throttle logs to avoid console flood during downloads
+    if getattr(_update_status, "last_progress", None) != _model_status["progress"] or phase != getattr(_update_status, "last_phase", None):
+        log.info("📊 [%s] %.0f%% — %s", phase, progress * 100, detail)
+        _update_status.last_progress = _model_status["progress"]
+        _update_status.last_phase = phase
 
 
 # ── Monkey-patch HuggingFace download to track progress ──
@@ -262,7 +270,7 @@ def _find_piper_binary() -> Optional[str]:
         return env_path
 
     # 2. VocalizeAI cache dir
-    cached = PIPER_DIR / binary_name
+    cached = PIPER_DIR / "piper" / binary_name
     if cached.is_file():
         if not IS_WINDOWS:
             os.chmod(str(cached), 0o755)
@@ -514,6 +522,95 @@ def run_piper_tts(text: str, output_wav: str, voice_id: str = None):
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError("Piper TTS timed out (>120s). Text may be too long.")
+
+
+# ────────────────────────────────────────────────────────────
+# OpenVoice Integration (Tone Color Converter)
+# ────────────────────────────────────────────────────────────
+
+def ensure_openvoice_model():
+    """Download and extract OpenVoice V2 checkpoint."""
+    checkpoint_zip = OPENVOICE_DIR / "checkpoints_v2_0417.zip"
+    
+    # Check both possible extraction paths
+    if (OPENVOICE_DIR / "checkpoints_v2" / "converter").exists():
+        return OPENVOICE_DIR / "checkpoints_v2"
+    if (OPENVOICE_DIR / "converter").exists():
+        return OPENVOICE_DIR
+        
+    url = "https://huggingface.co/kevinwang676/openvocie-v2/resolve/main/checkpoints_v2_0417.zip"
+    
+    log.info("⬇️  Downloading OpenVoice v2 model (~200MB)...")
+    _update_status("downloading_voice_clone", 0.0, "Starting OpenVoice v2 download...")
+    
+    import urllib.request
+    import zipfile
+    
+    def reporthook(block_num, block_size, total_size):
+        if total_size > 0:
+            percent = (block_num * block_size) / total_size
+            if percent > 1.0: percent = 1.0
+            
+            # Only update status if percentage changed by at least 1% to avoid overwhelming the frontend
+            current_pct = int(percent * 100)
+            if getattr(reporthook, "last_pct", -1) != current_pct:
+                _update_status("downloading_voice_clone", percent, f"Downloading OpenVoice v2... {current_pct}%")
+                reporthook.last_pct = current_pct
+        else:
+            # Fallback if total_size is unknown
+            downloaded = (block_num * block_size) / (1024 * 1024)
+            current_mb = int(downloaded)
+            if getattr(reporthook, "last_mb", -1) != current_mb:
+                _update_status("downloading_voice_clone", 0.5, f"Downloading OpenVoice v2... {downloaded:.1f}MB")
+                reporthook.last_mb = current_mb
+            
+    try:
+        urllib.request.urlretrieve(url, str(checkpoint_zip), reporthook=reporthook)
+    except Exception as e:
+        log.error("Failed to download OpenVoice: %s", e)
+        _update_status("error", 0.0, f"Error downloading OpenVoice: {e}")
+        raise
+        
+    _update_status("downloading_voice_clone", 1.0, "Extracting OpenVoice model...")
+    log.info("📦 Extracting OpenVoice model...")
+    try:
+        with zipfile.ZipFile(str(checkpoint_zip), 'r') as zip_ref:
+            zip_ref.extractall(str(OPENVOICE_DIR))
+    except Exception as e:
+        log.error("Failed to extract OpenVoice: %s", e)
+        _update_status("error", 0.0, f"Error extracting OpenVoice: {e}")
+        checkpoint_zip.unlink(missing_ok=True)
+        raise
+        
+    checkpoint_zip.unlink(missing_ok=True)
+    _model_status["voice_clone_ready"] = True
+    _update_status("idle", 1.0, "✅ Voice Clone model ready")
+    
+    if (OPENVOICE_DIR / "checkpoints_v2" / "converter").exists():
+        return OPENVOICE_DIR / "checkpoints_v2"
+    return OPENVOICE_DIR
+
+def get_tone_color_converter():
+    """Lazy load Tone Color Converter."""
+    global _tone_color_converter
+    if _tone_color_converter is not None:
+        return _tone_color_converter
+        
+    checkpoint_dir = ensure_openvoice_model()
+    
+    _update_status("loading_voice_clone", 0.5, "Loading Tone Color Converter...")
+    import torch
+    from openvoice.api import ToneColorConverter
+    
+    device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    config_path = str(checkpoint_dir / "converter" / "config.json")
+    ckpt_path = str(checkpoint_dir / "converter" / "checkpoint.pth")
+    
+    _tone_color_converter = ToneColorConverter(config_path, device=device)
+    _tone_color_converter.load_ckpt(ckpt_path)
+    
+    _update_status("idle", 1.0, "✅ Tone Color Converter loaded")
+    return _tone_color_converter
 
 
 # ────────────────────────────────────────────────────────────
@@ -958,7 +1055,15 @@ def get_models_list():
                 "downloaded": model_path.exists(),
             })
 
-    return {"whisper": whisper_list, "tts": piper_list}
+    openvoice_list = [{
+        "name": "OpenVoice Converter",
+        "type": "openvoice",
+        "language": "Multilingual",
+        "quality": "high",
+        "downloaded": (OPENVOICE_DIR / "checkpoints_v2" / "converter").exists() or (OPENVOICE_DIR / "converter").exists(),
+    }]
+
+    return {"whisper": whisper_list, "tts": piper_list, "openvoice": openvoice_list}
 
 def _download_whisper_bg(model_name: str):
     try:
@@ -983,6 +1088,10 @@ def download_model(model_name: str = Form(...), model_type: str = Form(...), bac
         if background_tasks:
             background_tasks.add_task(ensure_piper_model, model_name)
         return {"status": "downloading", "model": model_name, "type": "tts"}
+    elif model_type == "openvoice":
+        if background_tasks:
+            background_tasks.add_task(ensure_openvoice_model)
+        return {"status": "downloading", "model": "OpenVoice Converter", "type": "openvoice"}
     else:
         raise HTTPException(400, "Invalid model_type")
 
@@ -1008,8 +1117,70 @@ def delete_model(model_type: str, model_name: str):
         if deleted:
             return {"status": "deleted", "model": model_name}
         return {"status": "not_found", "model": model_name}
+    elif model_type == "openvoice":
+        deleted = False
+        if (OPENVOICE_DIR / "checkpoints_v2").exists():
+            shutil.rmtree(OPENVOICE_DIR / "checkpoints_v2", ignore_errors=True)
+            deleted = True
+        if (OPENVOICE_DIR / "converter").exists():
+            shutil.rmtree(OPENVOICE_DIR / "converter", ignore_errors=True)
+            deleted = True
+        if (OPENVOICE_DIR / "base_speakers").exists():
+            shutil.rmtree(OPENVOICE_DIR / "base_speakers", ignore_errors=True)
+            deleted = True
+            
+        if deleted:
+            return {"status": "deleted", "model": model_name}
+        return {"status": "not_found", "model": model_name}
+        
     raise HTTPException(400, "Invalid model_type")
 
+@app.post("/api/clone_voice")
+async def clone_voice(
+    text: str = Form(...),
+    voice_id: str = Form(TTS_MODEL_NAME),
+    reference_audio: UploadFile = File(...)
+):
+    """Generate TTS with Piper and clone the reference voice using OpenVoice."""
+    # 1. Save Reference Audio
+    import uuid
+    from openvoice import se_extractor
+    
+    job_id = str(uuid.uuid4())[:8]
+    ref_path = TEMP_DIR / f"ref_{job_id}_{reference_audio.filename}"
+    
+    with open(ref_path, "wb") as f:
+        f.write(await reference_audio.read())
+        
+    # 2. Get Tone Color Converter
+    tcc = get_tone_color_converter()
+    
+    # 3. Extract Target SE (Tone Color of Reference)
+    _update_status("processing_voice_clone", 0.3, "Extracting target voice profile...")
+    target_se, _ = se_extractor.get_se(str(ref_path), tcc, target_dir=str(TEMP_DIR), vad=True)
+    
+    # 4. Generate Base Audio (Piper)
+    base_audio_path = TEMP_DIR / f"base_{job_id}.wav"
+    _update_status("processing_voice_clone", 0.6, "Generating base speech (Piper)...")
+    run_piper_tts(text, str(base_audio_path), voice_id)
+    
+    # 5. Extract Source SE (Tone Color of Base)
+    _update_status("processing_voice_clone", 0.8, "Extracting source voice profile...")
+    source_se, _ = se_extractor.get_se(str(base_audio_path), tcc, target_dir=str(TEMP_DIR), vad=True)
+    
+    # 6. Convert Voice
+    output_path = TEMP_DIR / f"cloned_{job_id}.wav"
+    _update_status("processing_voice_clone", 0.9, "Applying Tone Color Conversion...")
+    tcc.convert(
+        audio_src_path=str(base_audio_path),
+        src_se=source_se,
+        tgt_se=target_se,
+        output_path=str(output_path),
+        message="@VocalizeAI"
+    )
+    
+    _update_status("idle", 1.0, "✅ Voice Cloning complete")
+    return FileResponse(str(output_path), media_type="audio/wav", filename=f"cloned_{job_id}.wav")
 
 @app.post("/clear-cache")
 async def clear_cache(clear_models: bool = False, clear_temp: bool = True):

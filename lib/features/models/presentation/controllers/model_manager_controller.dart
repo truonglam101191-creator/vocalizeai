@@ -6,7 +6,9 @@ import '../../domain/models/ai_model.dart';
 
 final downloadingModelsProvider = StateProvider<Set<String>>((ref) => {});
 
-final modelManagerProvider = AsyncNotifierProvider<ModelManagerController, Map<String, List<AiModel>>>(() {
+final modelManagerProvider =
+    AsyncNotifierProvider<ModelManagerController, Map<String, List<AiModel>>>(
+        () {
   return ModelManagerController();
 });
 
@@ -35,17 +37,18 @@ class ModelManagerController extends AsyncNotifier<Map<String, List<AiModel>>> {
               }
             }
             if (changed) {
-              ref.read(downloadingModelsProvider.notifier).state = newDownloading;
+              ref.read(downloadingModelsProvider.notifier).state =
+                  newDownloading;
             }
           }
         }
       });
     });
-    
+
     ref.onDispose(() {
       _timer?.cancel();
     });
-    
+
     return fetchModels();
   }
 
@@ -54,18 +57,30 @@ class ModelManagerController extends AsyncNotifier<Map<String, List<AiModel>>> {
       final response = await http.get(Uri.parse(_baseUrl));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final whisperList = (data['whisper'] as List).map((e) => AiModel.fromJson(e)).toList();
-        final ttsList = (data['tts'] as List).map((e) => AiModel.fromJson(e)).toList();
-        return {'whisper': whisperList, 'tts': ttsList};
+        final whisperList =
+            (data['whisper'] as List).map((e) => AiModel.fromJson(e)).toList();
+        final ttsList =
+            (data['tts'] as List).map((e) => AiModel.fromJson(e)).toList();
+        final openvoiceList = (data['openvoice'] as List?)
+                ?.map((e) => AiModel.fromJson(e))
+                .toList() ??
+            [];
+        return {
+          'whisper': whisperList,
+          'tts': ttsList,
+          'openvoice': openvoiceList
+        };
       }
     } catch (e) {
       // Ignore or log error
     }
-    return state.value ?? {'whisper': [], 'tts': []};
+    return state.value ?? {'whisper': [], 'tts': [], 'openvoice': []};
   }
 
   Future<void> downloadModel(String name, String type) async {
-    ref.read(downloadingModelsProvider.notifier).update((state) => {...state, name});
+    ref
+        .read(downloadingModelsProvider.notifier)
+        .update((state) => {...state, name});
     try {
       await http.post(
         Uri.parse('$_baseUrl/download'),
@@ -89,7 +104,7 @@ class ModelManagerController extends AsyncNotifier<Map<String, List<AiModel>>> {
       // Ignore
     }
   }
-  
+
   Future<void> refreshModels() async {
     final data = await fetchModels();
     state = AsyncData(data);
@@ -97,10 +112,12 @@ class ModelManagerController extends AsyncNotifier<Map<String, List<AiModel>>> {
 }
 
 // Add a provider to poll status from backend to show download progress
-final backendStatusProvider = StreamProvider<Map<String, dynamic>>((ref) async* {
+final backendStatusProvider =
+    StreamProvider<Map<String, dynamic>>((ref) async* {
   while (true) {
     try {
-      final response = await http.get(Uri.parse('http://127.0.0.1:5055/status'));
+      final response =
+          await http.get(Uri.parse('http://127.0.0.1:5055/status'));
       if (response.statusCode == 200) {
         yield jsonDecode(response.body);
       }

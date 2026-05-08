@@ -212,6 +212,48 @@ class _TtsTabState extends ConsumerState<TtsTab> {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: state.isProcessing ? null : () => controller.pickReferenceAudio(),
+                borderRadius: BorderRadius.circular(16),
+                child: BaseCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        state.referenceAudioFile != null ? Icons.record_voice_over_rounded : Icons.mic_external_on_rounded,
+                        color: state.referenceAudioFile != null ? const Color(0xFFF59E0B) : Colors.white54,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              state.referenceAudioFile != null ? p.basename(state.referenceAudioFile!) : l10n.get('referenceAudioOptional'),
+                              style: GoogleFonts.inter(
+                                color: state.referenceAudioFile != null ? Colors.white : Colors.white54,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              l10n.get('selectReferenceAudio'),
+                              style: GoogleFonts.inter(color: Colors.white30, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (state.referenceAudioFile != null && !state.isProcessing)
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 20),
+                          onPressed: () => controller.clearReferenceAudio(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
               BaseButton(
                 text: l10n.get('generateAudioTts'),

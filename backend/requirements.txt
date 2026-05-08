@@ -22,3 +22,7 @@ pydub>=0.25.1
 numpy<2.0
 spacy<3.8.0
 argostranslate
+
+# ── Voice Cloning ──
+openvoice
+librosa

@@ -37,6 +37,20 @@ class TtsController extends StateNotifier<TtsState> {
     state = state.copyWith(clearMediaFile: true);
   }
 
+  Future<void> pickReferenceAudio() async {
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      allowMultiple: false,
+    );
+    if (res != null && res.files.isNotEmpty) {
+      state = state.copyWith(referenceAudioFile: res.files.first.path);
+    }
+  }
+
+  void clearReferenceAudio() {
+    state = state.copyWith(clearReferenceAudio: true);
+  }
+
   Future<void> loadFiles() async {
     try {
       final docDir = await getApplicationDocumentsDirectory();
@@ -82,19 +96,32 @@ class TtsController extends StateNotifier<TtsState> {
     state = state.copyWith(isProcessing: true, outputWavPath: null);
     player.stop();
     try {
-      final req =
-          http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5055/tts'));
+      final isCloning = state.referenceAudioFile != null;
+      final endpoint = isCloning ? 'http://127.0.0.1:5055/api/clone_voice' : 'http://127.0.0.1:5055/tts';
+      final req = http.MultipartRequest('POST', Uri.parse(endpoint));
+      
       req.fields['text'] = text;
+      
       if (state.selectedVoice != null) {
-        req.fields['tts_voice'] = state.selectedVoice!;
+        if (isCloning) {
+          req.fields['voice_id'] = state.selectedVoice!;
+        } else {
+          req.fields['tts_voice'] = state.selectedVoice!;
+        }
       }
-      if (state.selectedMediaFile != null) {
+      
+      if (isCloning && File(state.referenceAudioFile!).existsSync()) {
+        req.files.add(await http.MultipartFile.fromPath('reference_audio', state.referenceAudioFile!));
+      }
+
+      if (!isCloning && state.selectedMediaFile != null) {
         if (File(state.selectedMediaFile!).existsSync()) {
           req.files.add(await http.MultipartFile.fromPath('media_file', state.selectedMediaFile!));
         } else {
           state = state.copyWith(clearMediaFile: true);
         }
       }
+      
       final res = await req.send().timeout(const Duration(minutes: 30));
       if (res.statusCode == 200) {
         final bytes = await res.stream.toBytes();
@@ -105,7 +132,7 @@ class TtsController extends StateNotifier<TtsState> {
         }
         
         bool isVideo = false;
-        if (state.selectedMediaFile != null) {
+        if (!isCloning && state.selectedMediaFile != null) {
            final lowerPath = state.selectedMediaFile!.toLowerCase();
            if (lowerPath.endsWith('.mp4') || lowerPath.endsWith('.mkv') || lowerPath.endsWith('.mov')) {
              isVideo = true;

@@ -102,7 +102,7 @@ class ModelManagerScreen extends ConsumerWidget {
   Widget _buildLists(BuildContext context, WidgetRef ref,
       Map<String, List<AiModel>> data, dynamic l10n) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Column(
         children: [
           Padding(
@@ -121,6 +121,7 @@ class ModelManagerScreen extends ConsumerWidget {
               tabs: [
                 Tab(text: l10n.get('whisperStt')),
                 Tab(text: l10n.get('piperTts')),
+                Tab(text: l10n.get('openvoiceClone')),
               ],
               dividerHeight: 0,
             ),
@@ -130,6 +131,7 @@ class ModelManagerScreen extends ConsumerWidget {
               children: [
                 _buildModelList(ref, data['whisper'] ?? [], l10n),
                 _buildModelList(ref, data['tts'] ?? [], l10n),
+                _buildModelList(ref, data['openvoice'] ?? [], l10n),
               ],
             ),
           ),
