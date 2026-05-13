@@ -109,6 +109,10 @@ class SttController extends StateNotifier<SttState> {
     state = state.copyWith(outputs: newOutputs);
   }
 
+  void toggleOcr(bool value) {
+    state = state.copyWith(useOcr: value);
+  }
+
   Future<void> runStt() async {
     if (state.selectedFiles.isEmpty) return;
     state = state.copyWith(isProcessing: true, errors: {}, outputs: {});
@@ -120,6 +124,7 @@ class SttController extends StateNotifier<SttState> {
             http.MultipartRequest('POST', Uri.parse('http://127.0.0.1:5055/stt'));
         req.files
             .add(await http.MultipartFile.fromPath('file', filePath));
+        req.fields['use_ocr'] = state.useOcr.toString();
         final res = await req.send().timeout(const Duration(minutes: 30));
         
         if (res.statusCode == 200) {

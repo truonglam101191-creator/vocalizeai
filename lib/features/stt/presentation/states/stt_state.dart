@@ -4,6 +4,7 @@ class SttState {
   final Map<String, String> outputs;
   final Map<String, String> errors;
   final String? currentProcessingFile;
+  final bool useOcr;
 
   const SttState({
     this.isProcessing = false,
@@ -11,6 +12,7 @@ class SttState {
     this.outputs = const {},
     this.errors = const {},
     this.currentProcessingFile,
+    this.useOcr = false,
   });
 
   SttState copyWith({
@@ -19,6 +21,7 @@ class SttState {
     Map<String, String>? outputs,
     Map<String, String>? errors,
     String? currentProcessingFile,
+    bool? useOcr,
     bool clearCurrentFile = false,
   }) {
     return SttState(
@@ -27,6 +30,7 @@ class SttState {
       outputs: outputs ?? this.outputs,
       errors: errors ?? this.errors,
       currentProcessingFile: clearCurrentFile ? null : (currentProcessingFile ?? this.currentProcessingFile),
+      useOcr: useOcr ?? this.useOcr,
     );
   }
 }

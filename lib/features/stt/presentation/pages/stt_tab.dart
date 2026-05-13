@@ -42,6 +42,26 @@ class SttTab extends ConsumerWidget {
           const SizedBox(height: 16),
           if (state.selectedFiles.isNotEmpty) ...[
             _buildFileList(state, controller, context, l10n, ref),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Switch(
+                  value: state.useOcr,
+                  onChanged: state.isProcessing ? null : controller.toggleOcr,
+                  activeColor: const Color(0xFF06B6D4),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Sử dụng OCR cho Video (lấy nội dung chính xác từ màn hình)',
+                    style: GoogleFonts.inter(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             BaseButton(
               text: state.isProcessing

@@ -773,6 +773,92 @@ def step_stt(mp3_path: Path, srt_path: Path, model_name: str = None) -> str:
     srt_content = write_srt(segments_list, srt_path)
     return srt_content
 
+def step_ocr_video(video_path: Path, srt_path: Path) -> str:
+    """Extract hardcoded text from video frames using EasyOCR."""
+    log.info(f"👁️  Step 1b: OCR Extraction from Video...")
+    try:
+        import cv2
+        import easyocr
+    except ImportError:
+        log.error("Missing easyocr or opencv-python-headless. Please install them.")
+        return ""
+        
+    reader = easyocr.Reader(['vi', 'en'], gpu=False)
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0 or fps != fps:
+        fps = 30
+        
+    frame_interval = int(fps * 2) # 1 frame every 2 seconds to speed up
+    count = 0
+    segments = []
+    current_text = ""
+    start_sec = 0.0
+    
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    _update_status("processing_stt", 0.0, "Starting OCR on video...")
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        if count % frame_interval == 0:
+            current_sec = count / fps
+            if total_frames > 0:
+                progress = count / total_frames
+                _update_status("processing_stt", progress, f"Extracting OCR... {int(progress * 100)}%")
+                
+            height, width = frame.shape[:2]
+            if width > 1280:
+                scale = 1280 / width
+                frame = cv2.resize(frame, (1280, int(height * scale)))
+                
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            text_list = reader.readtext(gray, detail=0, paragraph=True)
+            text = " ".join(text_list).strip()
+            
+            if text != current_text:
+                if current_text != "":
+                    segments.append({
+                        "start": start_sec,
+                        "end": current_sec,
+                        "text": current_text
+                    })
+                current_text = text
+                start_sec = current_sec
+                
+        count += 1
+        
+    if current_text != "":
+        current_sec = count / fps
+        segments.append({
+            "start": start_sec,
+            "end": current_sec,
+            "text": current_text
+        })
+        
+    cap.release()
+    _update_status("idle", 1.0, "OCR Extraction Complete")
+    
+    # Write SRT
+    lines = []
+    idx = 1
+    for seg in segments:
+        if not seg["text"]: continue
+        start_str = seconds_to_srt_time(seg["start"])
+        end_str = seconds_to_srt_time(seg["end"])
+        lines.append(f"{idx}")
+        lines.append(f"{start_str} --> {end_str}")
+        lines.append(seg["text"])
+        lines.append("")
+        idx += 1
+        
+    srt_content = "\n".join(lines)
+    srt_path.write_text(srt_content, encoding="utf-8")
+    log.info("📝 OCR SRT written to %s (%d segments)", srt_path, idx - 1)
+    return srt_content
+
 
 def _fallback_macos_say(text: str, clip_path: Path):
     """macOS-only fallback: use Apple's built-in 'say' command for TTS."""
@@ -1218,10 +1304,14 @@ def shutdown_server():
 
 
 @app.post("/stt")
-async def run_stt(file: UploadFile = File(...), whisper_model: str = Form(None)):
-    """Convert audio file to text using Whisper."""
-    if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".mov")):
-        raise HTTPException(400, "Only audio and video files are supported (mp3, wav, m4a, flac, ogg, mp4, mkv, mov)")
+async def run_stt(
+    file: UploadFile = File(...), 
+    whisper_model: str = Form(None),
+    use_ocr: str = Form("false")
+):
+    """Convert audio/video file to text using Whisper (and optionally OCR)."""
+    if not file.filename.lower().endswith((".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".mov", ".avi")):
+        raise HTTPException(400, "Only audio and video files are supported")
         
     job_id = f"job_{int(time.time() * 1000)}"
     job_dir = TEMP_DIR / job_id
@@ -1234,7 +1324,15 @@ async def run_stt(file: UploadFile = File(...), whisper_model: str = Form(None))
     mp3_path.write_bytes(content)
     
     import asyncio
-    srt_content = await asyncio.to_thread(step_stt, mp3_path, srt_path, whisper_model)
+    is_video = file.filename.lower().endswith((".mp4", ".mkv", ".mov", ".avi"))
+    do_ocr = use_ocr.lower() == "true"
+    
+    if is_video and do_ocr:
+        srt_content = await asyncio.to_thread(step_ocr_video, mp3_path, srt_path)
+        if not srt_content: # Fallback if OCR fails
+            srt_content = await asyncio.to_thread(step_stt, mp3_path, srt_path, whisper_model)
+    else:
+        srt_content = await asyncio.to_thread(step_stt, mp3_path, srt_path, whisper_model)
     
     # Extract plain text from SRT for easier use in Translate tab
     entries = parse_srt(srt_content)
