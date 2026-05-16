@@ -732,26 +732,40 @@ def chunk_text(text: str, max_chars: int = 200):
 
 def step_stt(mp3_path: Path, srt_path: Path, model_name: str = None) -> str:
     """Step 1: Audio/Video → SRT via faster-whisper"""
-    actual_audio_path = mp3_path
-    if mp3_path.suffix.lower() in [".mp4", ".mkv", ".mov"]:
-        actual_audio_path = mp3_path.with_suffix(".wav")
-        _update_status("processing_stt", 0.0, "Extracting audio from video...")
-        log.info(f"Extracting audio: {mp3_path} -> {actual_audio_path}")
-        import subprocess
-        subprocess.run([
-            "ffmpeg", "-y", "-i", str(mp3_path),
-            "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-            str(actual_audio_path)
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Always convert to 16kHz WAV for best compatibility with Silero VAD and Whisper
+    actual_audio_path = mp3_path.with_name(f"{mp3_path.stem}_converted.wav")
+    _update_status("processing_stt", 0.0, "Preparing audio format...")
+    log.info(f"Extracting/Converting audio: {mp3_path} -> {actual_audio_path}")
+    import subprocess
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(mp3_path),
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+        str(actual_audio_path)
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     log.info(f"🎙️  Step 1: Speech-to-Text (Whisper {model_name or WHISPER_MODEL_NAME})...")
     model = get_whisper_model(model_name)
+    
+    # Common Whisper hallucinations, especially for Vietnamese large-v3
+    hallucinations = [
+        "ghiền mì gõ",
+        "hãy subscribe",
+        "để không bỏ lỡ",
+        "cảm ơn các bạn",
+        "cám ơn các bạn",
+        "thanks for watching",
+        "subtitles by",
+        "amara.org",
+    ]
+
     segments, info = model.transcribe(
         str(actual_audio_path),
         language=None,          # auto-detect (works for Vietnamese too)
         beam_size=5,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
+        vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 100},
+        condition_on_previous_text=False,
+        initial_prompt="Đây là nội dung đoạn ghi âm:",
     )
     log.info(
         "   Detected language: %s (prob=%.2f), duration: %.2fs",
@@ -764,6 +778,11 @@ def step_stt(mp3_path: Path, srt_path: Path, model_name: str = None) -> str:
     _update_status("processing_stt", 0.0, f"Starting STT ({model_name})...")
     
     for segment in segments:
+        text_lower = segment.text.lower()
+        if any(h in text_lower for h in hallucinations):
+            log.info(f"Skipping hallucinated segment: {segment.text}")
+            continue
+            
         segments_list.append(segment)
         if info.duration > 0:
             progress = min(1.0, segment.end / info.duration)
